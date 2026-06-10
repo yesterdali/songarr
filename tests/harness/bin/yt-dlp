@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Mock yt-dlp for deterministic offline tests (plan §6: yt-dlp IS mocked).
+#
+# Search mode  (args contain ytsearchN:…): emits two flat-playlist JSON
+#   lines — a perfect Topic-channel match and a live-version decoy.
+# Download mode (otherwise): streams the fixture audio in throttled chunks
+#   so tests can observe a live pipe (~2.5s total).
+#
+# If MOCK_YTDLP_LOG is set, every invocation's args are appended there.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+if [ -n "${MOCK_YTDLP_LOG:-}" ]; then
+    printf '%s\n' "$*" >> "$MOCK_YTDLP_LOG"
+fi
+
+for arg in "$@"; do
+    case "$arg" in
+        ytsearch*:*)
+            QUERY="${arg#*:}"
+            printf '{"id":"mock00000001","url":"https://www.youtube.com/watch?v=mock0000001","title":"%s","duration":180.0,"channel":"Mock Artist - Topic"}\n' "$QUERY"
+            printf '{"id":"mock00000002","url":"https://www.youtube.com/watch?v=mock0000002","title":"%s (Live at Mockfest)","duration":260.0,"channel":"randomuser"}\n' "$QUERY"
+            exit 0
+            ;;
+    esac
+done
+
+FIXTURE="$HERE/../data/fixtures/source.webm"
+[ -f "$FIXTURE" ] || { echo "fixture missing — run tests/harness/seed.sh" >&2; exit 1; }
+
+SIZE=$(wc -c < "$FIXTURE")
+CHUNK=16384
+BLOCKS=$(( (SIZE + CHUNK - 1) / CHUNK ))
+i=0
+while [ "$i" -lt "$BLOCKS" ]; do
+    dd if="$FIXTURE" bs="$CHUNK" skip="$i" count=1 2>/dev/null
+    i=$((i + 1))
+    sleep 0.02
+done

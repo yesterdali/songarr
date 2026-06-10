@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+# Mock yt-dlp whose download mode never produces a byte in time — for
+# first-byte-timeout tests. Search mode answers normally.
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+
+for arg in "$@"; do
+    case "$arg" in
+        ytsearch*:*)
+            exec "$HERE/yt-dlp" "$@"
+            ;;
+    esac
+done
+
+sleep 30

@@ -1,0 +1,54 @@
+# Example deployment: Navidrome + Songarr Proxy + gluetun (VPN egress for yt-dlp).
+#
+# Clients point at http://<host>:4534 (the proxy) instead of Navidrome directly.
+# yt-dlp traffic is routed through gluetun's HTTP proxy via `ytdlp_proxy` in
+# songarr.toml (e.g. "http://gluetun:8888") — the proxy container itself is NOT
+# behind the VPN, only yt-dlp egress is.
+
+services:
+  navidrome:
+    image: deluan/navidrome:latest
+    restart: unless-stopped
+    environment:
+      ND_SCANSCHEDULE: "0"          # songarr triggers scans explicitly
+    volumes:
+      - ./data/navidrome:/data
+      - ./data/music:/music:ro
+    # No published port needed; reach it through the proxy. Uncomment to debug:
+    # ports:
+    #   - "4533:4533"
+
+  songarr-proxy:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - navidrome
+      - gluetun
+    ports:
+      - "4534:4534"
+    volumes:
+      - ./data/songarr:/config       # songarr.toml + songarr.db live here
+      - ./data/music:/music          # MUST be the same library Navidrome scans
+      - ./data/staging:/staging
+
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      # See https://github.com/qdm12/gluetun-wiki for your provider's settings.
+      VPN_SERVICE_PROVIDER: "custom"
+      VPN_TYPE: "wireguard"
+      WIREGUARD_PRIVATE_KEY: "change-me"
+      WIREGUARD_ADDRESSES: "10.0.0.2/32"
+      VPN_ENDPOINT_IP: "203.0.113.1"
+      VPN_ENDPOINT_PORT: "51820"
+      WIREGUARD_PUBLIC_KEY: "change-me"
+      # HTTP proxy consumed by yt-dlp (ytdlp_proxy = "http://gluetun:8888"):
+      HTTPPROXY: "on"
+      HTTPPROXY_LISTENING_ADDRESS: ":8888"

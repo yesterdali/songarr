@@ -1,0 +1,22 @@
+# Integration-test Navidrome. Bring up with tests/harness/up.sh.
+# The proxy under test runs in-process inside `cargo test`, pointed at
+# http://127.0.0.1:14533.
+services:
+  navidrome:
+    image: deluan/navidrome:latest
+    ports:
+      - "127.0.0.1:14533:4533"
+    environment:
+      # Auto-creates the admin user on first start (dev-only Navidrome flag).
+      ND_DEVAUTOCREATEADMINPASSWORD: "songarr-test"
+      ND_SCANSCHEDULE: "0"
+      ND_LOGLEVEL: "warn"
+      ND_ENABLEINSIGHTSCOLLECTOR: "false"
+    volumes:
+      # Named volume, NOT a bind mount: SQLite over macOS bind mounts throws
+      # intermittent "disk I/O error". Wiped by down.sh via `down -v`.
+      - navidrome-data:/data
+      - ./data/music:/music:ro
+
+volumes:
+  navidrome-data:

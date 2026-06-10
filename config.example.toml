@@ -1,0 +1,46 @@
+[server]
+bind = "0.0.0.0:4534"          # clients point HERE instead of Navidrome
+db_path = "/config/songarr.db"
+
+[navidrome]
+base_url = "http://navidrome:4533"
+# admin creds used ONLY for triggering scans + post-import verification,
+# never for serving user requests (user auth is passed through untouched)
+admin_user = "admin"
+admin_password = "change-me"
+
+[library]
+music_dir = "/music"
+ingest_subdir = "_songarr"      # imported singles land in /music/_songarr/Artist/…
+staging_dir = "/staging"
+
+[external_search]
+enabled = true
+provider = "deezer"             # deezer | ytmusic | both
+max_results = 8                 # virtual results appended per search
+min_query_len = 3
+
+[streaming]
+ytdlp_path = "yt-dlp"
+ytdlp_proxy = ""                # e.g. "http://gluetun:8888" — REQUIRED in RU deployments
+innertube = false               # native fast path (~1s to audio); falls back to yt-dlp on failure.
+                                # Off by default: without a PO token googlevideo serves only the
+                                # first ~1 MiB, so on token-gated egress IPs (datacenter/proxy)
+                                # it always falls back. Enable only on residential-grade egress.
+format = "opus"                 # transcode target for live pipe: opus | mp3
+bitrate_kbps = 160
+max_concurrent = 3
+timeout_first_byte_secs = 12    # if yt-dlp produces nothing by then → 503 to client
+
+[ingest]
+auto_import = true              # move played tracks into /music
+min_score_for_import = 80       # candidate match score gate
+write_playlist = "Songarr Played.m3u"  # optional rolling playlist of imports, "" disables
+
+[upgrade]
+mode = "none"                   # none | soulsync_wishlist (best-effort, see M6)
+soulsync_url = "http://soulsync:8888"
+
+[users]
+default_can_trigger_downloads = true
+deny = []                       # usernames who get passthrough-only (no virtual results)

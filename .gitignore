@@ -1,0 +1,10 @@
+/target
+/config.toml
+*.db
+*.db-shm
+*.db-wal
+/staging/
+/docker/data/
+.DS_Store
+tests/harness/data/
+.claude/settings.local.json
