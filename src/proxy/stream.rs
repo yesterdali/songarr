@@ -43,6 +43,7 @@ pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
     };
 
     if !vtrack::is_virtual_id(&id) {
+        spawn_real_stream_prewarm(state.clone(), id.clone());
         return passthrough::handler(State(state), req).await;
     }
 
@@ -81,6 +82,40 @@ pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
             stream_error(&state, format, &error.to_string()).await
         }
     }
+}
+
+fn spawn_real_stream_prewarm(state: AppState, id: String) {
+    if id.trim().is_empty() || !state.config.artist_expansion.enabled {
+        return;
+    }
+    tokio::spawn(async move {
+        match fetch_real_song_artist(&state, &id).await {
+            Ok(Some(artist)) => super::artist::spawn_prewarm(state, artist),
+            Ok(None) => {}
+            Err(error) => tracing::debug!(%error, id, "real stream prewarm metadata lookup failed"),
+        }
+    });
+}
+
+async fn fetch_real_song_artist(state: &AppState, id: &str) -> anyhow::Result<Option<String>> {
+    let encoded_id: String = url::form_urlencoded::byte_serialize(id.as_bytes()).collect();
+    let url = format!(
+        "{}/rest/getSong?{}&id={encoded_id}&f=json",
+        state.config.navidrome.base_url.trim_end_matches('/'),
+        crate::subsonic::auth::admin_auth_query(&state.config.navidrome)
+    );
+    let value: serde_json::Value = state
+        .http
+        .get(url)
+        .timeout(Duration::from_secs(5))
+        .send()
+        .await?
+        .error_for_status()?
+        .json()
+        .await?;
+    Ok(value["subsonic-response"]["song"]["artist"]
+        .as_str()
+        .map(ToOwned::to_owned))
 }
 
 async fn stream_error(state: &AppState, format: Format, message: &str) -> Response {
@@ -288,6 +323,7 @@ async fn start_pipeline(
             )
         }
     };
+    super::artist::spawn_prewarm(state.clone(), track.artist.clone());
 
     use tokio_stream::StreamExt;
     let body_stream = tokio_stream::once(Ok(first_chunk))

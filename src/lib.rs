@@ -8,6 +8,7 @@ pub mod proxy;
 pub mod recs;
 pub mod resolve;
 pub mod subsonic;
+pub mod valbum;
 pub mod vtrack;
 
 use std::path::{Path, PathBuf};
@@ -40,6 +41,9 @@ pub struct AppState {
     pub resolve_gate: Arc<tokio::sync::Semaphore>,
     /// Tracks ids currently being prefetch-resolved (dedup across searches).
     pub resolve_inflight: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Tracks artist expansion prewarms currently in flight (dedup across
+    /// streams/scrobbles/discovery generation).
+    pub artist_prewarm_inflight: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
     envelope_cache: Arc<tokio::sync::OnceCell<Envelope>>,
 }
 
@@ -68,6 +72,9 @@ impl AppState {
             stream_gate,
             resolve_gate: Arc::new(tokio::sync::Semaphore::new(2)),
             resolve_inflight: Arc::new(tokio::sync::Mutex::new(std::collections::HashSet::new())),
+            artist_prewarm_inflight: Arc::new(tokio::sync::Mutex::new(
+                std::collections::HashSet::new(),
+            )),
             envelope_cache: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
@@ -141,6 +148,8 @@ pub fn build_app(state: AppState) -> Router {
     let router = intercept!(router, "search2", proxy::search::search2_handler);
     let router = intercept!(router, "search3", proxy::search::search3_handler);
     let router = intercept!(router, "getSong", proxy::song::handler);
+    let router = intercept!(router, "getArtist", proxy::artist::handler);
+    let router = intercept!(router, "getAlbum", proxy::album::handler);
     let router = intercept!(router, "getCoverArt", proxy::coverart::handler);
     let router = intercept!(router, "stream", proxy::stream::handler);
     let router = intercept!(router, "download", proxy::stream::handler);

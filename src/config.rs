@@ -29,6 +29,37 @@ pub struct Config {
     pub users: Users,
     #[serde(default)]
     pub recommendations: Recommendations,
+    #[serde(default)]
+    pub artist_expansion: ArtistExpansion,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct ArtistExpansion {
+    /// getArtist/getAlbum enrichment with provider albums. Off leaves both
+    /// endpoints as plain Navidrome passthrough.
+    pub enabled: bool,
+    pub max_albums: u32,
+    pub max_tracks_per_album: u32,
+    pub cache_ttl_hours: u32,
+    pub include_singles: bool,
+    pub include_top_tracks_album: bool,
+    /// 0-100 resolver confidence required before querying an artist catalog.
+    pub min_artist_match_score: u32,
+}
+
+impl Default for ArtistExpansion {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_albums: 12,
+            max_tracks_per_album: 30,
+            cache_ttl_hours: 168,
+            include_singles: true,
+            include_top_tracks_album: true,
+            min_artist_match_score: 70,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

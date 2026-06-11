@@ -1,3 +1,5 @@
+pub mod album;
+pub mod artist;
 pub mod coverart;
 pub mod lyrics;
 pub mod passthrough;
@@ -11,6 +13,8 @@ pub mod stream;
 use axum::extract::{Request, State};
 use axum::response::Response;
 
+use crate::subsonic::types::SongEntry;
+use crate::vtrack::VirtualTrack;
 use crate::AppState;
 
 /// Replace the `id` query param and forward to Navidrome — used once a
@@ -50,6 +54,22 @@ pub(crate) async fn rewrite_id_and_passthrough(
     }
 
     passthrough::handler(State(state), Request::from_parts(parts, body)).await
+}
+
+pub(crate) async fn song_entry_with_repaired_artwork(
+    state: &AppState,
+    mut track: VirtualTrack,
+) -> SongEntry {
+    if track.artwork_url.is_none() {
+        if let Err(error) = crate::valbum::repair_track_artwork(&state.db, &mut track).await {
+            tracing::debug!(
+                %error,
+                id = track.id,
+                "virtual track artwork repair failed"
+            );
+        }
+    }
+    SongEntry::from_virtual(&track, &state.config.streaming)
 }
 
 #[cfg(test)]

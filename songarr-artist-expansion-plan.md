@@ -45,6 +45,13 @@ When a user opens an artist page:
 - External albums are virtual grouping objects only; they do not become real
   Navidrome albums until their tracks are imported.
 - If external providers fail, the artist page falls back to vanilla Navidrome.
+- When the user first listens to a track by an artist, Songarr should be able
+  to warm that artist's external catalog in the background so opening the
+  artist page later is instant or nearly instant.
+- "Stored locally" for prewarmed artist expansion means local SQLite metadata,
+  ordered album payloads, and cached artwork bytes. Audio still stays
+  stream/import-on-demand unless a track is actually played or explicitly
+  imported.
 
 Expected client-facing result:
 
@@ -164,18 +171,11 @@ CREATE TABLE virtual_albums (
   release_date TEXT,
   artwork_url TEXT,
   track_count INTEGER,
+  payload_json TEXT NOT NULL,       -- provider album + ordered track payload
   status TEXT NOT NULL DEFAULT 'virtual',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(provider, provider_album_id)
-);
-
-CREATE TABLE virtual_album_tracks (
-  virtual_album_id TEXT NOT NULL REFERENCES virtual_albums(id),
-  virtual_track_id TEXT NOT NULL REFERENCES virtual_tracks(id),
-  disc_number INTEGER,
-  track_number INTEGER,
-  PRIMARY KEY (virtual_album_id, virtual_track_id)
 );
 
 CREATE TABLE artist_catalog_cache (
@@ -187,14 +187,21 @@ CREATE TABLE artist_catalog_cache (
 );
 ```
 
-Potential simplification for first pass:
+For v1, deliberately **skip a `virtual_album_tracks` join table**.
 
-- Skip `virtual_album_tracks`.
-- Store album track payloads in `virtual_albums.payload_json`.
-- Normalize later if this becomes painful.
+The access pattern is album-local:
 
-Prefer normalized tables if time allows; the query patterns are simple and
-tests will be clearer.
+```text
+open artist -> list virtual albums
+open one virtual album -> list that album's tracks
+```
+
+There is no v1 query that needs "all tracks across virtual albums" or "all
+albums containing this track." The join table adds foreign-key/upsert ordering
+ceremony without buying behavior. Store the ordered provider album payload in
+`payload_json`; on `getAlbum?id=sga_...`, parse it, upsert/refresh each track
+into `virtual_tracks`, then render normal `sgr_...` entries. Normalize only
+when a real query needs it.
 
 ## 6. Providers
 
@@ -219,14 +226,53 @@ Implementation shape:
 
 ```text
 artist name
-  -> Deezer artist search
+  -> artist resolver (cross-script/cross-provider matching)
   -> best artist match
   -> artist/{id}/albums
   -> album/{id}
   -> upsert virtual album
   -> upsert each track as virtual_tracks(provider='deezer')
-  -> link tracks to album
+  -> store ordered album+track payload in virtual_albums.payload_json
 ```
+
+### Artist resolver is core A1
+
+The first step is not a naive string lookup. For this project, Cyrillic/Latin
+artist identity is a primary path, not a later hardening pass:
+
+```text
+Оксимирон       <-> Oxxxymiron
+Молчат Дома    <-> Molchat Doma
+Скриптонит     <-> Skryptonite / Scriptonite
+Кино           <-> Kino
+```
+
+If artist matching misses, the whole feature silently looks broken: the artist
+page opens, Songarr finds no useful external catalog, and the user sees only
+local content. So A1 must include a provider artist resolver.
+
+Resolver flow:
+
+```text
+library artist name
+  -> generate query variants
+  -> Deezer artist search
+  -> score candidates
+  -> verify with local-track/top-track overlap when possible
+  -> cache provider_artist_id
+```
+
+Scoring inputs:
+
+- exact normalized name match,
+- `deunicode` transliteration match,
+- small RU alias/transliteration table,
+- configured alias overrides,
+- optional overlap between local track titles and provider top tracks,
+- popularity/fan count as a tie-breaker only.
+
+The resolver should return a confidence score. Low-confidence matches should
+skip expansion rather than polluting an artist page with the wrong artist.
 
 ### YTM later
 
@@ -249,6 +295,12 @@ Dedup rules:
   with duration tolerance when both durations are known.
 - Imported `virtual_tracks.status = 'imported'` should also suppress matching
   virtual tracks.
+- Cross-script title equivalents must dedup. Example: `Sudno` and `Судно`
+  by `Molchat Doma` / `Молчат Дома` should be treated as the same track.
+- Provider subtitle variants should dedup when the base identity matches.
+  Example: `Судно (Борис Рыжий)` may be the catalog title while `Sudno` is
+  the common romanized title; both should collapse when artist, duration, and
+  provider evidence agree.
 
 Reuse the existing `SongKey` normalization from `proxy::search` where possible.
 For album matching, add:
@@ -262,7 +314,50 @@ Normalize with:
 - lowercase,
 - `deunicode`,
 - ASCII alphanumeric only,
-- later: RU transliteration hardening if needed.
+- RU transliteration/alias handling from the A1 artist resolver.
+
+Add a small title-alias/resolver layer for the high-impact Cyrillic/Latin
+cases that `deunicode` alone does not solve:
+
+```text
+Судно       <-> Sudno
+Тоска       <-> Toska
+Клетка      <-> Kletka
+```
+
+This should be data-driven enough to grow from observed misses, but not so
+aggressive that it merges unrelated short titles. Prefer using artist match,
+duration tolerance, provider track/album context, or ISRC as supporting
+evidence before merging ambiguous one-word titles.
+
+### Artwork preservation and repair
+
+Virtual results should not lose covers after they have once been shown or
+played.
+
+Rules:
+
+- Do not overwrite an existing non-null `virtual_tracks.artwork_url` with
+  `NULL` during recommendation/search/album refreshes.
+- When a played/recommended track lacks artwork but came from a virtual album
+  payload, fall back to that album's `artwork_url`.
+- When a provider candidate lacks artwork in one endpoint but has a stable
+  provider track/album id, repair it by looking up provider detail or the
+  artist-expansion album payload in the background.
+- Cache artwork bytes under stable Songarr ids (`sgr_...` and `sga_...`) and
+  keep serving cached bytes even if a later provider refresh omits the URL.
+- Discovery playlist entries should include `coverArt` whenever Songarr has
+  either track artwork, album artwork, or cached artwork for that virtual id.
+
+Required regression examples:
+
+- `Sudno` and `Судно (Борис Рыжий)` do not both appear as separate discovery
+  items when they resolve to the same Molchat Doma track.
+- A virtual track with cover art keeps showing cover art after it has been
+  listened to, cached, recommended again, and served from the discovery
+  playlist.
+- A track generated from a virtual album inherits album art if the provider
+  track object has no track-specific artwork.
 
 ## 8. Response synthesis
 
@@ -353,18 +448,57 @@ Provider failure:
 - Log warning.
 - Do not poison cache unless explicitly storing negative cache entries later.
 
+### Listen-triggered prewarm
+
+Artist expansion should not wait until the user clicks an artist page. On the
+first meaningful listen for an artist, Songarr should enqueue an artist
+catalog prewarm job:
+
+```text
+stream/scrobble/listen observed
+  -> normalize artist identity
+  -> if artist cache missing/stale, enqueue prewarm
+  -> resolve provider artist
+  -> fetch albums + tracks
+  -> upsert virtual_albums payload_json
+  -> cache album/track artwork bytes opportunistically
+```
+
+Trigger sources:
+
+- successful `stream` of a virtual `sgr_...` track,
+- `scrobble` for real or virtual tracks,
+- R3 discovery playlist generation when it selects a new artist seed.
+
+Guardrails:
+
+- Dedup in-flight jobs by normalized artist key.
+- Rate-limit provider calls so ordinary listening cannot stampede Deezer/YTM.
+- Treat prewarm as best-effort: never delay playback or scrobble responses.
+- Store enough locally that opening `getArtist` mostly reads SQLite and cached
+  artwork instead of blocking on provider calls.
+- Negative-cache unresolved artists briefly, but retry later; name matching
+  may improve as aliases are added.
+
 ## 10. Milestones
 
 ### A1 — Schema and provider catalog
 
 - Add config section `[artist_expansion]`.
-- Add `virtual_albums`, `virtual_album_tracks`, `artist_catalog_cache`.
+- Add `virtual_albums` with `payload_json`, plus `artist_catalog_cache`.
+- Add provider artist resolver with cross-script matching.
 - Add `catalog::deezer` artist/album methods.
 - Unit tests for Deezer response parsing using fixtures.
+- Unit tests for artist resolution:
+  - `Оксимирон` -> `Oxxxymiron`
+  - `Молчат Дома` -> `Molchat Doma`
+  - `Скриптонит` -> expected configured/fixture alias
+  - wrong high-popularity candidate loses to track-overlap evidence
 
 Exit:
 
-- Given a mocked Deezer artist, Songarr can upsert virtual albums and tracks.
+- Given a mocked Deezer artist, Songarr can resolve the provider artist id and
+  upsert virtual albums with ordered track payloads.
 
 ### A2 — `getAlbum` for virtual albums
 
@@ -424,6 +558,40 @@ Record:
 - Whether `coverArt` works.
 - Whether seeking works after import/remap.
 
+### A6 — Listen-triggered artist prewarm
+
+- Add a lightweight background prewarm queue keyed by normalized artist.
+- Trigger it from successful virtual streams, scrobbles, and discovery seed
+  selection.
+- Reuse the A1 artist resolver and A3 catalog fetch/upsert path.
+- Cache album payloads and artwork locally without downloading audio.
+- Make `getArtist` prefer fresh local cached expansion data and only perform
+  synchronous provider calls on true cache miss.
+
+Exit:
+
+- Listen to one song by an artist, then open that artist page: external
+  albums appear without the user waiting on provider fetch latency.
+- Provider slowness during prewarm never slows playback.
+- Repeated listens by the same artist produce one in-flight prewarm job.
+
+### A7 — Cross-script track dedup and artwork repair
+
+- Extend track dedup beyond simple `deunicode` for known Cyrillic/Latin title
+  aliases such as `Sudno` / `Судно`.
+- Use artist identity, duration, provider ids, album context, and ISRC when
+  available to avoid unsafe merges.
+- Add artwork backfill/repair for virtual tracks that lost or never received
+  `artwork_url`.
+- Ensure discovery playlist entries and virtual album tracks can fall back to
+  album artwork.
+
+Exit:
+
+- Discovery/recommendation playlists no longer show `Sudno` and `Судно` as
+  separate items when they refer to the same track.
+- Previously listened virtual tracks keep or regain cover art.
+
 ## 11. Testing strategy
 
 No tests should hit real external providers.
@@ -439,11 +607,17 @@ Required tests:
 
 - `getArtist` appends virtual albums after local albums.
 - local album dedup suppresses matching virtual album.
+- cross-script track title dedup suppresses `Sudno` / `Судно` duplicates.
+- Cyrillic/Latin artist resolver fixtures select the intended provider artist.
+- low-confidence artist resolver matches return vanilla Navidrome content.
 - provider failure returns vanilla Navidrome body.
 - virtual album id stability across repeated artist opens.
 - `getAlbum` for virtual album returns virtual tracks.
 - unknown `sga_...` returns Subsonic error 70.
 - virtual album cover art fetches/caches artwork.
+- virtual track artwork is not lost when later provider payloads omit art.
+- virtual album track falls back to album artwork when track artwork is absent.
+- listen-triggered prewarm stores artist catalog metadata before `getArtist`.
 - track from virtual album streams via existing `stream` handler.
 
 ## 12. Definition of done

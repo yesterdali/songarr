@@ -47,6 +47,15 @@ weight_deezer = 0.6
 weight_lastfm = 0.8             # requires lastfm_api_key
 lastfm_api_key = ""
 
+[artist_expansion]
+enabled = true                  # show external provider albums under getArtist
+max_albums = 12
+max_tracks_per_album = 30
+cache_ttl_hours = 168
+include_singles = true
+include_top_tracks_album = true
+min_artist_match_score = 70     # Cyrillic/Latin resolver confidence gate
+
 [upgrade]
 mode = "none"                   # none | soulsync_wishlist (best-effort, see M6)
 soulsync_url = "http://soulsync:8888"

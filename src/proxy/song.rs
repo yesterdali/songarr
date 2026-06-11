@@ -5,7 +5,6 @@
 use axum::extract::{Request, State};
 use axum::response::Response;
 
-use crate::subsonic::types::SongEntry;
 use crate::subsonic::{auth, error_not_found, Format};
 use crate::vtrack;
 use crate::AppState;
@@ -28,7 +27,7 @@ pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
     let envelope = state.envelope().await;
     match vtrack::get(&state.db, &id).await {
         Ok(Some(track)) if track.real_subsonic_id.is_none() => {
-            let entry = SongEntry::from_virtual(&track, &state.config.streaming);
+            let entry = super::song_entry_with_repaired_artwork(&state, track).await;
             envelope.render_ok(format, Some(entry.into_payload()))
         }
         Ok(Some(track)) => {

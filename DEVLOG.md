@@ -178,6 +178,38 @@ returns Content-Length; no sgr_ duplicate in fresh searches; playlist line
 written) and the low-score park (streams fine, never imports, staging file
 kept, reason recorded). All four integration suites green together.
 
+## Artist Expansion A1-A4 — External Artist Catalog (2026-06-11)
+
+Done: `getArtist` enrichment appends external Deezer albums as virtual
+`sga_` albums after local Navidrome albums, with local-album dedup and vanilla
+passthrough fallback on provider failure. `getAlbum?id=sga_...` synthesizes a
+Subsonic album response from `virtual_albums.payload_json`, upserts each album
+track into the existing `sgr_` virtual-track flow, and returns playable songs.
+`getCoverArt` now serves cached art for virtual album ids too. Added
+`[artist_expansion]` config and a migration for `virtual_albums` plus
+`artist_catalog_cache`.
+
+Resolver note: Cyrillic/Latin artist matching is part of the core flow, not a
+later pass. The Deezer resolver normalizes/transliterates names and includes
+aliases for common library cases such as `Оксимирон` ↔ `Oxxxymiron`,
+`Молчат Дома` ↔ `Molchat Doma`, `Скриптонит` ↔ `Skryptonite`, and `Кино` ↔
+`Kino`; low-confidence matches skip expansion instead of polluting an artist
+page.
+
+Verified: full `cargo test` green. New `tests/artist_expansion.rs` uses mock
+Navidrome + mock Deezer to cover JSON/XML album injection, virtual album id
+stability, local album dedup, provider failure fallback, `getAlbum` synthesis,
+album cover art, unknown virtual album error 70, and streaming from a track
+created through a virtual album.
+
+Follow-up implemented: listening now prewarms artist expansion in the
+background from virtual streams, scrobbles, and discovery seed generation,
+deduped by artist key so playback never waits on provider calls. Track identity
+dedup now handles common Cyrillic/Latin aliases such as `Sudno` /
+`Судно (Борис Рыжий)`, and virtual tracks with missing artwork can repair from
+cached virtual album payloads. Verified with artist-expansion integration,
+recommendation integration, library unit tests, and `cargo check`.
+
 Next: M5 — admin mini-UI (jobs list, needs_review approve/reject, per-user
 toggles, /metrics).
 

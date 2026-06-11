@@ -452,7 +452,7 @@ async fn upsert_candidates(
         let stored = vtrack::get(&state.db, &id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("virtual track {id} vanished"))?;
-        entries.push(SongEntry::from_virtual(&stored, &state.config.streaming));
+        entries.push(super::song_entry_with_repaired_artwork(state, stored).await);
         chosen_keys.push(key);
         chosen_candidates.push(candidate);
         if entries.len() >= count {

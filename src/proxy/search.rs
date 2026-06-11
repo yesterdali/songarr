@@ -155,7 +155,7 @@ async fn intercepted(
         let stored = crate::vtrack::get(&state.db, &id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("virtual track {id} vanished"))?;
-        entries.push(SongEntry::from_virtual(&stored, &state.config.streaming));
+        entries.push(super::song_entry_with_repaired_artwork(state, stored).await);
     }
     tracing::info!(
         query = search_query,
@@ -200,8 +200,36 @@ pub(crate) fn raw_response(
 
 pub(crate) fn is_ok_response(body: &str, format: Format) -> bool {
     match format {
-        Format::Json => body.contains("\"status\":\"ok\""),
-        Format::Xml => body.contains("status=\"ok\""),
+        Format::Json => serde_json::from_str::<serde_json::Value>(body)
+            .ok()
+            .and_then(|v| {
+                v.get("subsonic-response")
+                    .and_then(|r| r.get("status"))
+                    .and_then(|s| s.as_str())
+                    .map(|s| s == "ok")
+            })
+            .unwrap_or(false),
+        Format::Xml => {
+            let mut reader = quick_xml::Reader::from_str(body);
+            loop {
+                match reader.read_event() {
+                    Ok(Event::Start(e)) | Ok(Event::Empty(e))
+                        if e.local_name().as_ref() == b"subsonic-response" =>
+                    {
+                        return e.attributes().flatten().any(|attr| {
+                            attr.key.as_ref() == b"status"
+                                && attr
+                                    .unescape_value()
+                                    .map(|value| value.as_ref() == "ok")
+                                    .unwrap_or(false)
+                        });
+                    }
+                    Ok(Event::Eof) => return false,
+                    Ok(_) => {}
+                    Err(_) => return false,
+                }
+            }
+        }
     }
 }
 
@@ -217,8 +245,8 @@ pub(crate) struct SongKey {
 impl SongKey {
     pub(crate) fn new(artist: &str, title: &str, duration_secs: Option<i64>) -> Self {
         Self {
-            artist: normalize(artist),
-            title: normalize(title),
+            artist: crate::recs::artist_key(artist),
+            title: crate::recs::title_key(title),
             duration_secs,
         }
     }
@@ -237,12 +265,9 @@ impl SongKey {
 }
 
 /// Lowercased, transliterated to ASCII, alphanumerics only.
+#[cfg(test)]
 fn normalize(value: &str) -> String {
-    deunicode::deunicode(value)
-        .to_lowercase()
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .collect()
+    crate::recs::normalize(value)
 }
 
 // ---- Existing-song extraction ----
@@ -415,9 +440,39 @@ mod tests {
         assert!(a.matches(&SongKey::new("Daft Punk", "One More Time", None)));
         assert!(!a.matches(&SongKey::new("Daft Punk", "One More Time", Some(360))));
         assert!(!a.matches(&SongKey::new("Daft Punk", "Around the World", Some(320))));
+        assert!(
+            SongKey::new("Molchat Doma", "Sudno", Some(130)).matches(&SongKey::new(
+                "Молчат Дома",
+                "Судно (Борис Рыжий)",
+                Some(129)
+            ))
+        );
     }
 
     const JSON_FIXTURE: &str = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","type":"navidrome","serverVersion":"0.62.0 (1b46b977)","openSubsonic":true,"searchResult3":{"song":[{"id":"abc","title":"Tone 220 Hz","artist":"The Sine Waves","duration":4}]}}}"#;
+
+    #[test]
+    fn ok_response_detection_parses_json_and_xml() {
+        let pretty_json = r#"{
+          "subsonic-response": {
+            "status": "ok",
+            "version": "1.16.1"
+          }
+        }"#;
+        assert!(is_ok_response(pretty_json, Format::Json));
+        assert!(!is_ok_response(
+            r#"{"subsonic-response":{"status":"failed"}}"#,
+            Format::Json
+        ));
+        assert!(is_ok_response(
+            r#"<subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1"/>"#,
+            Format::Xml
+        ));
+        assert!(!is_ok_response(
+            r#"<subsonic-response status="failed" version="1.16.1"/>"#,
+            Format::Xml
+        ));
+    }
 
     #[test]
     fn json_injection_appends_after_existing() {

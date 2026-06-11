@@ -125,6 +125,8 @@ async fn log_virtual_listen(state: &AppState, username: &str, id: &str, query: &
             .await
             {
                 tracing::warn!(%error, id, "failed to record virtual listen");
+            } else {
+                super::artist::spawn_prewarm(state.clone(), track.artist.clone());
             }
         }
         Ok(None) => {}
@@ -148,6 +150,8 @@ async fn log_real_listens(state: &AppState, username: &str, ids: &[String], quer
                 .await
                 {
                     tracing::warn!(%error, id, "failed to record real listen");
+                } else {
+                    super::artist::spawn_prewarm(state.clone(), artist.clone());
                 }
             }
             Ok(None) => {}

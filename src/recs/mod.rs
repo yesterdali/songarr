@@ -45,7 +45,39 @@ impl RecCandidate {
 }
 
 pub fn song_key(artist: &str, title: &str) -> String {
-    format!("{}|{}", normalize(artist), normalize(title))
+    format!("{}|{}", artist_key(artist), title_key(title))
+}
+
+pub fn artist_key(artist: &str) -> String {
+    let normalized = normalize(artist);
+    match normalized.as_str() {
+        "oksimiron" | "oxxxymiron" => "oxxxymiron".into(),
+        "molchatdoma" => "molchatdoma".into(),
+        "skriptonit" | "skryptonite" | "scriptonite" => "skryptonite".into(),
+        "kino" => "kino".into(),
+        _ => normalized,
+    }
+}
+
+pub fn title_key(title: &str) -> String {
+    let trimmed = title.trim();
+    let normalized = normalize(trimmed);
+    if let Some(alias) = title_alias(&normalized) {
+        return alias.into();
+    }
+
+    // Provider catalogs often include poem/subtitle qualifiers for CIS
+    // tracks, while search/recs may use the common romanized title.
+    // Collapse only when the visible base title is a known alias; this avoids
+    // turning every "(Live)" or "(Remix)" into the studio track.
+    if let Some(base) = leading_title_before_brackets(trimmed) {
+        let base_normalized = normalize(base);
+        if let Some(alias) = title_alias(&base_normalized) {
+            return alias.into();
+        }
+    }
+
+    normalize(&clean_title(trimmed))
 }
 
 pub fn normalize(value: &str) -> String {
@@ -56,13 +88,45 @@ pub fn normalize(value: &str) -> String {
         .collect()
 }
 
+fn title_alias(normalized: &str) -> Option<&'static str> {
+    match normalized {
+        "sudno" => Some("sudno"),
+        "toska" => Some("toska"),
+        "kletka" => Some("kletka"),
+        _ => None,
+    }
+}
+
+fn leading_title_before_brackets(title: &str) -> Option<&str> {
+    for open in ['(', '['] {
+        let Some(index) = title.find(open) else {
+            continue;
+        };
+        let base = title[..index].trim();
+        if !base.is_empty() {
+            return Some(base);
+        }
+    }
+    None
+}
+
 /// Alternate-version markers that make a candidate a different (unwanted)
 /// track, not just a noisy title. These get DROPPED — both YouTube uploads
 /// (slowed+reverb, nightcore, parodies) and the slowed/sped releases Deezer
 /// genuinely carries in an artist's catalog.
 const JUNK_MARKERS: &[&str] = &[
-    "slowed", "sped up", "spedup", "reverb", "nightcore", "8d audio", "8daudio",
-    "bass boost", "bassboost", "karaoke", "parody", "parodi",
+    "slowed",
+    "sped up",
+    "spedup",
+    "reverb",
+    "nightcore",
+    "8d audio",
+    "8daudio",
+    "bass boost",
+    "bassboost",
+    "karaoke",
+    "parody",
+    "parodi",
 ];
 
 /// True if the title is an alternate edit we don't want surfaced as a rec.
@@ -80,8 +144,21 @@ pub fn is_junk_version(title: &str) -> bool {
 /// these — legit qualifiers like (feat. …), (Remix), (Live), (Acoustic) are
 /// kept because none of these words appear in them.
 const TITLE_CRUFT: &[&str] = &[
-    "official", "lyric", "lyrics", "visualizer", "video", "audio", "m/v", "mv",
-    "dir. by", "dir by", "subtitle", "eng sub", "hd", "hq", "4k",
+    "official",
+    "lyric",
+    "lyrics",
+    "visualizer",
+    "video",
+    "audio",
+    "m/v",
+    "mv",
+    "dir. by",
+    "dir by",
+    "subtitle",
+    "eng sub",
+    "hd",
+    "hq",
+    "4k",
 ];
 
 /// Strip video-upload noise from a title so it matches the real track:
@@ -314,6 +391,22 @@ pub async fn discovery_ids_get(
     username: &str,
     ttl_hours: u32,
 ) -> sqlx::Result<Option<Vec<String>>> {
+    Ok(discovery_cache_get(pool, username, ttl_hours)
+        .await?
+        .map(|cache| cache.track_ids))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscoveryCache {
+    pub track_ids: Vec<String>,
+    pub fetched_at_epoch: i64,
+}
+
+pub async fn discovery_cache_get(
+    pool: &SqlitePool,
+    username: &str,
+    ttl_hours: u32,
+) -> sqlx::Result<Option<DiscoveryCache>> {
     if username.is_empty() || ttl_hours == 0 {
         return Ok(None);
     }
@@ -329,7 +422,12 @@ pub async fn discovery_ids_get(
     if crate::vtrack::epoch_secs() - fetched_at > i64::from(ttl_hours) * 3600 {
         return Ok(None);
     }
-    Ok(serde_json::from_str(&payload).ok())
+    Ok(serde_json::from_str(&payload)
+        .ok()
+        .map(|track_ids| DiscoveryCache {
+            track_ids,
+            fetched_at_epoch: fetched_at,
+        }))
 }
 
 pub async fn discovery_ids_set(
@@ -353,6 +451,30 @@ pub async fn discovery_ids_set(
     .map(|_| ())
 }
 
+pub async fn discovery_ids_clear(pool: &SqlitePool, username: &str) -> sqlx::Result<()> {
+    sqlx::query("DELETE FROM rec_cache WHERE source = 'discovery' AND seed_key = ?")
+        .bind(username)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+pub async fn listened_ids_since(
+    pool: &SqlitePool,
+    username: &str,
+    since_epoch: i64,
+) -> sqlx::Result<std::collections::HashSet<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT DISTINCT subsonic_id FROM listens
+         WHERE username = ? AND listened_at_epoch >= ? AND subsonic_id IS NOT NULL",
+    )
+    .bind(username)
+    .bind(since_epoch)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -364,6 +486,17 @@ mod tests {
             song_key("Skriptonit", "Gde tvoia liubov")
         );
         assert_eq!(song_key("AC/DC", "T.N.T."), "acdc|tnt");
+    }
+
+    #[test]
+    fn song_key_collapses_known_cyrillic_latin_title_aliases() {
+        assert_eq!(
+            song_key("Молчат Дома", "Судно (Борис Рыжий)"),
+            song_key("Molchat Doma", "Sudno")
+        );
+        assert_eq!(title_key("Тоска"), title_key("Toska"));
+        assert_eq!(title_key("Клетка"), title_key("Kletka"));
+        assert_ne!(title_key("Closer (Remix)"), title_key("Closer"));
     }
 
     #[tokio::test]
@@ -408,14 +541,23 @@ mod tests {
         assert_eq!(clean_title("Song (Audio)"), "Song");
         assert_eq!(clean_title("Whatever - Topic"), "Whatever");
         // legit parentheticals survive
-        assert_eq!(clean_title("Crew Love (feat. Drake)"), "Crew Love (feat. Drake)");
+        assert_eq!(
+            clean_title("Crew Love (feat. Drake)"),
+            "Crew Love (feat. Drake)"
+        );
         assert_eq!(clean_title("Closer (Remix)"), "Closer (Remix)");
     }
 
     #[test]
     fn strip_artist_prefix_only_when_it_matches() {
-        assert_eq!(strip_artist_prefix("Motorama — Tell Me", "Motorama"), "Tell Me");
-        assert_eq!(strip_artist_prefix("Motorama - Tell Me", "Motorama"), "Tell Me");
+        assert_eq!(
+            strip_artist_prefix("Motorama — Tell Me", "Motorama"),
+            "Tell Me"
+        );
+        assert_eq!(
+            strip_artist_prefix("Motorama - Tell Me", "Motorama"),
+            "Tell Me"
+        );
         // wrong/channel artist: leave the title untouched rather than corrupt it
         assert_eq!(
             strip_artist_prefix("Наутилус Помпилиус - Крылья", "StarPro"),
@@ -438,5 +580,29 @@ mod tests {
         // ttl_hours = 0 disables the cache; empty username never caches.
         assert_eq!(discovery_ids_get(&pool, "u", 0).await.unwrap(), None);
         assert_eq!(discovery_ids_get(&pool, "", 24).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn listened_ids_since_returns_distinct_subsonic_ids() {
+        let pool = crate::db::init(
+            &std::env::temp_dir()
+                .join(format!("songarr-listened-ids-{}", uuid::Uuid::new_v4()))
+                .join("t.db"),
+        )
+        .await
+        .unwrap();
+        record_listen(&pool, "u", "A", "One", Some("sgr_1"), 10)
+            .await
+            .unwrap();
+        record_listen(&pool, "u", "A", "One", Some("sgr_1"), 20)
+            .await
+            .unwrap();
+        record_listen(&pool, "u", "B", "Two", Some("sgr_2"), 30)
+            .await
+            .unwrap();
+        let ids = listened_ids_since(&pool, "u", 15).await.unwrap();
+        assert_eq!(ids.len(), 2);
+        assert!(ids.contains("sgr_1"));
+        assert!(ids.contains("sgr_2"));
     }
 }

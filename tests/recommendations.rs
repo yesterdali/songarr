@@ -756,6 +756,29 @@ async fn r3_discovery_playlist_appears_and_serves_recommendations() {
             && entry["id"].as_str().unwrap_or("").starts_with("sgr_")),
         "discovery playlist should contain virtual recommendations: {body}"
     );
+    for entry in entries {
+        let id = entry["id"].as_str().unwrap();
+        let _ = fetch_json(
+            &proxy.url,
+            &format!("/rest/scrobble?{}&id={id}", auth_query(Some("json"))),
+        )
+        .await;
+    }
+    let refreshed = fetch_json(
+        &proxy.url,
+        &format!(
+            "/rest/getPlaylist?{}&id=songarr_discovery",
+            auth_query(Some("json"))
+        ),
+    )
+    .await;
+    let refreshed_entries = refreshed["subsonic-response"]["playlist"]["entry"]
+        .as_array()
+        .unwrap();
+    assert!(
+        !refreshed_entries.is_empty(),
+        "consuming cached discovery should regenerate a non-empty playlist: {refreshed}"
+    );
 
     let (status, _, raw) = fetch(
         &proxy.url,

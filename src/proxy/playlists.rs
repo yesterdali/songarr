@@ -46,6 +46,13 @@ pub async fn get_playlists_handler(State(state): State<AppState>, req: Request) 
     };
     match new_body {
         Ok(new_body) => {
+            tracing::info!(
+                username,
+                song_count = summary.song_count,
+                duration = summary.duration,
+                format = ?format,
+                "injected Songarr Discovery into getPlaylists"
+            );
             headers.remove(CONTENT_LENGTH);
             headers.remove(CONTENT_TYPE);
             let mut response = Response::builder()
@@ -95,10 +102,13 @@ pub async fn get_playlist_handler(State(state): State<AppState>, req: Request) -
 /// track ids; empty results are not cached, so a user who just started
 /// listening isn't locked into an empty playlist for the whole TTL.
 async fn discovery_entries(state: &AppState, username: &str) -> anyhow::Result<Vec<SongEntry>> {
-    if let Ok(Some(ids)) =
-        crate::recs::discovery_ids_get(&state.db, username, DISCOVERY_TTL_HOURS).await
+    if let Ok(Some(cache)) =
+        crate::recs::discovery_cache_get(&state.db, username, DISCOVERY_TTL_HOURS).await
     {
-        return Ok(load_entries(state, &ids).await);
+        if !cached_discovery_consumed(state, username, &cache).await {
+            return Ok(load_entries(state, &cache.track_ids).await);
+        }
+        let _ = crate::recs::discovery_ids_clear(&state.db, username).await;
     }
     let entries = generate_discovery(state, username).await?;
     if !entries.is_empty() {
@@ -108,13 +118,30 @@ async fn discovery_entries(state: &AppState, username: &str) -> anyhow::Result<V
     Ok(entries)
 }
 
+async fn cached_discovery_consumed(
+    state: &AppState,
+    username: &str,
+    cache: &crate::recs::DiscoveryCache,
+) -> bool {
+    if cache.track_ids.is_empty() {
+        return false;
+    }
+    match crate::recs::listened_ids_since(&state.db, username, cache.fetched_at_epoch).await {
+        Ok(listened) => cache.track_ids.iter().all(|id| listened.contains(id)),
+        Err(error) => {
+            tracing::debug!(%error, username, "failed to check discovery consumption");
+            false
+        }
+    }
+}
+
 /// Re-hydrate cached discovery ids into song entries. Tracks that have since
 /// vanished are skipped rather than failing the whole playlist.
 async fn load_entries(state: &AppState, ids: &[String]) -> Vec<SongEntry> {
     let mut entries = Vec::with_capacity(ids.len());
     for id in ids {
         if let Ok(Some(track)) = crate::vtrack::get(&state.db, id).await {
-            entries.push(SongEntry::from_virtual(&track, &state.config.streaming));
+            entries.push(super::song_entry_with_repaired_artwork(state, track).await);
         }
     }
     entries
@@ -126,6 +153,7 @@ async fn generate_discovery(state: &AppState, username: &str) -> anyhow::Result<
     let mut entries = Vec::new();
     let mut existing = Vec::new();
     for seed in seeds {
+        super::artist::spawn_prewarm(state.clone(), seed.artist.clone());
         let seed = seed_track_from_listen(state, seed).await;
         let remaining = target.saturating_sub(entries.len());
         if remaining == 0 {
@@ -157,10 +185,12 @@ async fn seed_track_from_listen(state: &AppState, seed: crate::recs::ListenSeed)
             }
         }
     }
-    let provider_track_id = seed
-        .subsonic_id
-        .clone()
-        .unwrap_or_else(|| format!("listen:{}", crate::recs::song_key(&seed.artist, &seed.title)));
+    let provider_track_id = seed.subsonic_id.clone().unwrap_or_else(|| {
+        format!(
+            "listen:{}",
+            crate::recs::song_key(&seed.artist, &seed.title)
+        )
+    });
     SeedTrack {
         artist: seed.artist,
         title: seed.title,
@@ -281,11 +311,24 @@ fn inject_playlist_json(body: &str, summary: &PlaylistSummary) -> anyhow::Result
         .ok_or_else(|| anyhow::anyhow!("playlists is not an object"))?
         .entry("playlist")
         .or_insert_with(|| serde_json::json!([]));
-    let list = list
-        .as_array_mut()
-        .ok_or_else(|| anyhow::anyhow!("playlist is not an array"))?;
-    list.retain(|p| p["id"] != DISCOVERY_ID);
-    list.push(summary.to_json());
+    match list {
+        serde_json::Value::Array(items) => {
+            items.retain(|p| p["id"] != DISCOVERY_ID);
+            items.push(summary.to_json());
+        }
+        serde_json::Value::Object(_) => {
+            let existing = std::mem::take(list);
+            *list = if existing["id"] == DISCOVERY_ID {
+                serde_json::json!([summary.to_json()])
+            } else {
+                serde_json::json!([existing, summary.to_json()])
+            };
+        }
+        serde_json::Value::Null => {
+            *list = serde_json::json!([summary.to_json()]);
+        }
+        _ => anyhow::bail!("playlist is not an array or object"),
+    }
     Ok(value.to_string())
 }
 
@@ -335,4 +378,22 @@ fn ok_body_text(status: axum::http::StatusCode, body: &[u8], format: Format) -> 
         .ok()
         .filter(|text| status.is_success() && search::is_ok_response(text, format))
         .map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_json_injection_handles_singleton_object() {
+        let body = r#"{"subsonic-response":{"status":"ok","playlists":{"playlist":{"id":"real","name":"Songarr Played"}}}}"#;
+        let out = inject_playlist_json(body, &PlaylistSummary::empty("admin")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(&out).unwrap();
+        let playlists = value["subsonic-response"]["playlists"]["playlist"]
+            .as_array()
+            .unwrap();
+        assert_eq!(playlists.len(), 2);
+        assert_eq!(playlists[0]["id"], "real");
+        assert_eq!(playlists[1]["id"], DISCOVERY_ID);
+    }
 }

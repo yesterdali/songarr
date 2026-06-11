@@ -184,6 +184,23 @@ pub async fn set_status(
     .map(|_| ())
 }
 
+pub async fn set_artwork_if_missing(
+    pool: &SqlitePool,
+    id: &str,
+    artwork_url: &str,
+) -> sqlx::Result<()> {
+    sqlx::query(
+        "UPDATE virtual_tracks SET artwork_url = COALESCE(artwork_url, ?), updated_at = ?
+         WHERE id = ?",
+    )
+    .bind(artwork_url)
+    .bind(now_utc())
+    .bind(id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
 pub fn now_utc() -> String {
     // ISO-8601 UTC without subsecond noise; std-only (no chrono needed yet).
     let secs = std::time::SystemTime::now()
