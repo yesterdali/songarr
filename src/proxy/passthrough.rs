@@ -101,9 +101,7 @@ async fn send_upstream(
             .ok_or_else(|| anyhow::anyhow!("unacceptable request content-length {len:?}"))?;
         let bytes = axum::body::to_bytes(body, limit).await?;
         upstream_req.body(bytes)
-    } else if parts.method == axum::http::Method::GET
-        || parts.method == axum::http::Method::HEAD
-    {
+    } else if parts.method == axum::http::Method::GET || parts.method == axum::http::Method::HEAD {
         upstream_req
     } else {
         // No Content-Length on a method that may carry a body: stream it

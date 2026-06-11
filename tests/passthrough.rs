@@ -24,7 +24,10 @@ async fn assert_passthrough_identical(path_and_query: &str) {
     let (direct_status, direct_headers, direct_body) = fetch(&navidrome, path_and_query).await;
     let (proxy_status, proxy_headers, proxy_body) = fetch(&proxy, path_and_query).await;
 
-    assert_eq!(direct_status, proxy_status, "status differs: {path_and_query}");
+    assert_eq!(
+        direct_status, proxy_status,
+        "status differs: {path_and_query}"
+    );
     assert_eq!(
         direct_headers.get("content-type"),
         proxy_headers.get("content-type"),
@@ -112,7 +115,11 @@ async fn get_album_list2() {
 #[ignore = "integration: run tests/harness/up.sh first"]
 async fn search3() {
     let _guard = serial();
-    assert_both_formats("search3", "query=Tone&songCount=20&albumCount=5&artistCount=5").await;
+    assert_both_formats(
+        "search3",
+        "query=Tone&songCount=20&albumCount=5&artistCount=5",
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -160,7 +167,10 @@ async fn web_ui_and_root_redirect() {
     let (direct_status, direct_headers, _) = fetch(&navidrome, "/").await;
     let (proxy_status, proxy_headers, _) = fetch(&proxy, "/").await;
     assert_eq!(direct_status, proxy_status);
-    assert_eq!(direct_headers.get("location"), proxy_headers.get("location"));
+    assert_eq!(
+        direct_headers.get("location"),
+        proxy_headers.get("location")
+    );
 
     // Web UI shell is served identically.
     assert_passthrough_identical("/app/").await;

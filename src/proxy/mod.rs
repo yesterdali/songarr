@@ -1,8 +1,10 @@
 pub mod coverart;
 pub mod lyrics;
 pub mod passthrough;
+pub mod playlists;
 pub mod scrobble;
 pub mod search;
+pub mod similar;
 pub mod song;
 pub mod stream;
 

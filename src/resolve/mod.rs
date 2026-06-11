@@ -49,9 +49,11 @@ pub async fn resolve_cached(
     state: &crate::AppState,
     track: &crate::vtrack::VirtualTrack,
 ) -> anyhow::Result<Resolution> {
-    if let (Some(url), Some(score), Some(at)) =
-        (&track.resolved_url, track.resolved_score, track.resolved_at_epoch)
-    {
+    if let (Some(url), Some(score), Some(at)) = (
+        &track.resolved_url,
+        track.resolved_score,
+        track.resolved_at_epoch,
+    ) {
         if crate::vtrack::epoch_secs() - at < RESOLUTION_TTL_SECS {
             tracing::debug!(track = track.id, "using cached resolution");
             return Ok(Resolution {
@@ -110,7 +112,11 @@ pub async fn prefetch(state: crate::AppState, track_ids: Vec<String>) {
                     &resolution.candidate_title,
                 )
                 .await;
-                tracing::debug!(track = id, score = resolution.score, "prefetched resolution");
+                tracing::debug!(
+                    track = id,
+                    score = resolution.score,
+                    "prefetched resolution"
+                );
             }
             Err(error) => {
                 tracing::debug!(%error, track = id, "prefetch resolve failed");
@@ -186,7 +192,8 @@ pub fn score(track: &VirtualTrack, candidate: &Candidate) -> i64 {
     score += 50.0 * direct.max(combined);
 
     // Artist presence (up to 25).
-    if !want_artist.is_empty() && (got_title.contains(&want_artist) || uploader.contains(&want_artist))
+    if !want_artist.is_empty()
+        && (got_title.contains(&want_artist) || uploader.contains(&want_artist))
     {
         score += 20.0;
     }
@@ -218,8 +225,18 @@ pub fn score(track: &VirtualTrack, candidate: &Candidate) -> i64 {
 
     // Suspicious keywords, unless the wanted title itself contains them.
     const SUSPECT: &[&str] = &[
-        "live", "cover", "remix", "slowed", "nightcore", "8d", "spedup", "reverb", "karaoke",
-        "instrumental", "reaction", "lyrics video",
+        "live",
+        "cover",
+        "remix",
+        "slowed",
+        "nightcore",
+        "8d",
+        "spedup",
+        "reverb",
+        "karaoke",
+        "instrumental",
+        "reaction",
+        "lyrics video",
     ];
     for keyword in SUSPECT {
         let k = normalize(keyword);
@@ -303,8 +320,12 @@ mod tests {
         let want = track("Artist", "Song (Remix)", 200);
         let remix = candidate("Artist - Song (Remix)", "Artist - Topic", 200.0);
         let plain = candidate("Artist - Song", "Artist - Topic", 200.0);
-        assert!(score(&want, &remix) > score(&want, &plain),
-            "remix {} vs plain {}", score(&want, &remix), score(&want, &plain));
+        assert!(
+            score(&want, &remix) > score(&want, &plain),
+            "remix {} vs plain {}",
+            score(&want, &remix),
+            score(&want, &plain)
+        );
     }
 
     #[test]

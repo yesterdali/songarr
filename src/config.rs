@@ -27,6 +27,47 @@ pub struct Config {
     pub upgrade: Upgrade,
     #[serde(default)]
     pub users: Users,
+    #[serde(default)]
+    pub recommendations: Recommendations,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Recommendations {
+    /// getSimilarSongs/getSimilarSongs2/getTopSongs interception. Off →
+    /// those endpoints pass through to Navidrome untouched.
+    pub enabled: bool,
+    /// Cap on injected recommendation entries per response (the client's
+    /// own `count` param can only lower it).
+    pub max_results: u32,
+    pub shown_cooldown_days: u32,
+    pub cache_ttl_hours: u32,
+    pub weight_ytm: f32,
+    pub weight_deezer: f32,
+    pub weight_lastfm: f32,
+    pub lastfm_api_key: String,
+    /// Override for tests; rarely set by hand. YTM song-radio lives on
+    /// music.youtube.com, not www.
+    pub ytm_api_base: String,
+    /// Override for tests; rarely set by hand.
+    pub lastfm_api_base: String,
+}
+
+impl Default for Recommendations {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_results: 20,
+            shown_cooldown_days: 7,
+            cache_ttl_hours: 72,
+            weight_ytm: 1.0,
+            weight_deezer: 0.6,
+            weight_lastfm: 0.8,
+            lastfm_api_key: String::new(),
+            ytm_api_base: "https://music.youtube.com".into(),
+            lastfm_api_base: "https://ws.audioscrobbler.com/2.0".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -241,6 +282,7 @@ mod tests {
         assert_eq!(config.external_search.max_results, 8);
         assert_eq!(config.streaming.format, StreamFormat::Opus);
         assert_eq!(config.upgrade.mode, UpgradeMode::None);
+        assert_eq!(config.recommendations.cache_ttl_hours, 72);
         assert!(config.users.deny.is_empty());
     }
 

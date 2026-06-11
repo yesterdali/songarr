@@ -54,11 +54,7 @@ impl Default for Envelope {
 impl Envelope {
     /// Wrap a payload (e.g. `"song": {…}`) in a full subsonic-response, in
     /// the requested format. `payload` is (key, json value, xml writer fn).
-    pub fn render_ok(
-        &self,
-        format: Format,
-        payload: Option<types::Payload<'_>>,
-    ) -> Response {
+    pub fn render_ok(&self, format: Format, payload: Option<types::Payload<'_>>) -> Response {
         self.render(format, "ok", None, payload)
     }
 

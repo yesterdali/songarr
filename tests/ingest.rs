@@ -77,12 +77,11 @@ async fn virtual_id(proxy_url: &str, query: &str, title: &str) -> String {
 async fn wait_for_track_status(proxy: &TestProxy, id: &str, status: &str) {
     let pool = proxy.db().await;
     for _ in 0..300 {
-        let current: (String,) =
-            sqlx::query_as("SELECT status FROM virtual_tracks WHERE id = ?")
-                .bind(id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let current: (String,) = sqlx::query_as("SELECT status FROM virtual_tracks WHERE id = ?")
+            .bind(id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         if current.0 == status {
             pool.close().await;
             return;
@@ -179,21 +178,29 @@ async fn full_import_flow_end_to_end() {
     )
     .await;
     assert_eq!(
-        via_virtual["subsonic-response"]["song"]["id"].as_str().unwrap(),
+        via_virtual["subsonic-response"]["song"]["id"]
+            .as_str()
+            .unwrap(),
         real_id
     );
 
     // Searching again shows the real track, no sgr_ duplicate.
     let results = fetch_json(
         &proxy.url,
-        &format!("/rest/search3?{}&query=Mock+Artist", auth_query(Some("json"))),
+        &format!(
+            "/rest/search3?{}&query=Mock+Artist",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     let songs = results["subsonic-response"]["searchResult3"]["song"]
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let mock_ones: Vec<_> = songs.iter().filter(|s| s["title"] == "Mock Song One").collect();
+    let mock_ones: Vec<_> = songs
+        .iter()
+        .filter(|s| s["title"] == "Mock Song One")
+        .collect();
     assert_eq!(mock_ones.len(), 1, "exactly one Mock Song One: {results}");
     assert!(
         !mock_ones[0]["id"].as_str().unwrap().starts_with("sgr_"),
@@ -202,7 +209,10 @@ async fn full_import_flow_end_to_end() {
 
     // Rolling playlist recorded the import.
     let playlist = std::fs::read_to_string(music_dir().join("Songarr Played.m3u")).unwrap();
-    assert!(playlist.contains("Mock Artist - Mock Song One"), "{playlist}");
+    assert!(
+        playlist.contains("Mock Artist - Mock Song One"),
+        "{playlist}"
+    );
 
     cleanup_imports().await;
 }

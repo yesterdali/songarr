@@ -44,7 +44,10 @@ async fn handle(state: AppState, req: Request, kind: SearchKind) -> Response {
         (
             Format::from_query_value(params.get("f").map(|v| v.as_ref())),
             params.get("u").map(|v| v.to_string()).unwrap_or_default(),
-            params.get("query").map(|v| v.to_string()).unwrap_or_default(),
+            params
+                .get("query")
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
         )
     };
     // Symfonium and others probe with `""` (quoted empty) for "browse all".
@@ -54,7 +57,12 @@ async fn handle(state: AppState, req: Request, kind: SearchKind) -> Response {
     let intercept = cfg.enabled
         && format.is_some()
         && effective_query.len() >= cfg.min_query_len as usize
-        && !state.config.users.deny.iter().any(|denied| denied == &username);
+        && !state
+            .config
+            .users
+            .deny
+            .iter()
+            .any(|denied| denied == &username);
 
     if !intercept {
         return passthrough::handler(State(state), req).await;
@@ -92,8 +100,12 @@ async fn intercepted(
         }
     };
 
-    let catalog = match crate::catalog::search(&state.http, &state.config.external_search, search_query)
-        .await
+    let catalog = match crate::catalog::search(
+        &state.http,
+        &state.config.external_search,
+        search_query,
+    )
+    .await
     {
         Ok(results) => results,
         Err(error) => {
@@ -173,7 +185,7 @@ async fn intercepted(
     Ok(response)
 }
 
-fn raw_response(
+pub(crate) fn raw_response(
     status: axum::http::StatusCode,
     headers: axum::http::HeaderMap,
     body: Vec<u8>,
@@ -186,7 +198,7 @@ fn raw_response(
     response
 }
 
-fn is_ok_response(body: &str, format: Format) -> bool {
+pub(crate) fn is_ok_response(body: &str, format: Format) -> bool {
     match format {
         Format::Json => body.contains("\"status\":\"ok\""),
         Format::Xml => body.contains("status=\"ok\""),
@@ -196,14 +208,14 @@ fn is_ok_response(body: &str, format: Format) -> bool {
 // ---- Dedup keys ----
 
 #[derive(Debug, Clone, PartialEq)]
-struct SongKey {
+pub(crate) struct SongKey {
     artist: String,
     title: String,
     duration_secs: Option<i64>,
 }
 
 impl SongKey {
-    fn new(artist: &str, title: &str, duration_secs: Option<i64>) -> Self {
+    pub(crate) fn new(artist: &str, title: &str, duration_secs: Option<i64>) -> Self {
         Self {
             artist: normalize(artist),
             title: normalize(title),
@@ -213,7 +225,7 @@ impl SongKey {
 
     /// Same normalized artist+title; durations only veto when both known
     /// and more than 3s apart.
-    fn matches(&self, other: &Self) -> bool {
+    pub(crate) fn matches(&self, other: &Self) -> bool {
         if self.artist != other.artist || self.title != other.title {
             return false;
         }
@@ -235,7 +247,7 @@ fn normalize(value: &str) -> String {
 
 // ---- Existing-song extraction ----
 
-fn existing_songs_json(body: &str, result_key: &str) -> Vec<SongKey> {
+pub(crate) fn existing_songs_json(body: &str, result_key: &str) -> Vec<SongKey> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(body) else {
         return Vec::new();
     };
@@ -257,7 +269,7 @@ fn existing_songs_json(body: &str, result_key: &str) -> Vec<SongKey> {
         .unwrap_or_default()
 }
 
-fn existing_songs_xml(body: &str) -> Vec<SongKey> {
+pub(crate) fn existing_songs_xml(body: &str) -> Vec<SongKey> {
     let mut reader = quick_xml::Reader::from_str(body);
     let mut keys = Vec::new();
     loop {
@@ -287,7 +299,11 @@ fn existing_songs_xml(body: &str) -> Vec<SongKey> {
 
 // ---- Injection ----
 
-fn inject_json(body: &str, result_key: &str, entries: &[SongEntry]) -> anyhow::Result<String> {
+pub(crate) fn inject_json(
+    body: &str,
+    result_key: &str,
+    entries: &[SongEntry],
+) -> anyhow::Result<String> {
     let mut value: serde_json::Value = serde_json::from_str(body)?;
     let envelope = value
         .get_mut("subsonic-response")
@@ -311,7 +327,11 @@ fn inject_json(body: &str, result_key: &str, entries: &[SongEntry]) -> anyhow::R
 /// Append `<song …/>` elements inside `<searchResultN>`, handling the
 /// normal, self-closing, and absent element cases. All untouched events are
 /// re-emitted as-is.
-fn inject_xml(body: &str, result_key: &str, entries: &[SongEntry]) -> anyhow::Result<String> {
+pub(crate) fn inject_xml(
+    body: &str,
+    result_key: &str,
+    entries: &[SongEntry],
+) -> anyhow::Result<String> {
     let mut reader = quick_xml::Reader::from_str(body);
     let mut writer = quick_xml::Writer::new(Vec::new());
     let mut injected = false;
@@ -372,10 +392,10 @@ mod tests {
                 artwork_url: Some("https://example.com/c.jpg".into()),
                 status: "virtual".into(),
                 real_subsonic_id: None,
-            resolved_url: None,
-            resolved_score: None,
-            resolved_title: None,
-            resolved_at_epoch: None,
+                resolved_url: None,
+                resolved_score: None,
+                resolved_title: None,
+                resolved_at_epoch: None,
             },
             &Streaming::default(),
         )
@@ -401,9 +421,16 @@ mod tests {
 
     #[test]
     fn json_injection_appends_after_existing() {
-        let out = inject_json(JSON_FIXTURE, "searchResult3", &[entry("sgr_x", "A", "B", 100)]).unwrap();
+        let out = inject_json(
+            JSON_FIXTURE,
+            "searchResult3",
+            &[entry("sgr_x", "A", "B", 100)],
+        )
+        .unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        let songs = v["subsonic-response"]["searchResult3"]["song"].as_array().unwrap();
+        let songs = v["subsonic-response"]["searchResult3"]["song"]
+            .as_array()
+            .unwrap();
         assert_eq!(songs.len(), 2);
         assert_eq!(songs[0]["id"], "abc");
         assert_eq!(songs[1]["id"], "sgr_x");
@@ -416,27 +443,43 @@ mod tests {
         let body = r#"{"subsonic-response":{"status":"ok","version":"1.16.1","searchResult3":{}}}"#;
         let out = inject_json(body, "searchResult3", &[entry("sgr_x", "A", "B", 100)]).unwrap();
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
-        assert_eq!(v["subsonic-response"]["searchResult3"]["song"][0]["id"], "sgr_x");
+        assert_eq!(
+            v["subsonic-response"]["searchResult3"]["song"][0]["id"],
+            "sgr_x"
+        );
     }
 
     const XML_FIXTURE: &str = r#"<?xml version="1.0" encoding="UTF-8"?><subsonic-response xmlns="http://subsonic.org/restapi" status="ok" version="1.16.1" type="navidrome" serverVersion="0.62.0 (1b46b977)" openSubsonic="true"><searchResult3><song id="abc" title="Tone 220 Hz" artist="The Sine Waves" duration="4"></song></searchResult3></subsonic-response>"#;
 
     #[test]
     fn xml_injection_appends_inside_result_element() {
-        let out = inject_xml(XML_FIXTURE, "searchResult3", &[entry("sgr_x", "A", "B", 100)]).unwrap();
+        let out = inject_xml(
+            XML_FIXTURE,
+            "searchResult3",
+            &[entry("sgr_x", "A", "B", 100)],
+        )
+        .unwrap();
         assert!(out.contains(r#"<song id="abc""#), "{out}");
         assert!(out.contains(r#"<song id="sgr_x""#), "{out}");
         assert!(
             out.find("abc").unwrap() < out.find("sgr_x").unwrap(),
             "virtual songs must come after real ones: {out}"
         );
-        assert!(out.contains(r#"serverVersion="0.62.0 (1b46b977)""#), "{out}");
+        assert!(
+            out.contains(r#"serverVersion="0.62.0 (1b46b977)""#),
+            "{out}"
+        );
     }
 
     #[test]
     fn xml_injection_handles_self_closing_and_missing_element() {
         let self_closing = r#"<subsonic-response status="ok" version="1.16.1"><searchResult3/></subsonic-response>"#;
-        let out = inject_xml(self_closing, "searchResult3", &[entry("sgr_x", "A", "B", 9)]).unwrap();
+        let out = inject_xml(
+            self_closing,
+            "searchResult3",
+            &[entry("sgr_x", "A", "B", 9)],
+        )
+        .unwrap();
         assert!(out.contains(r#"<searchResult3><song id="sgr_x""#), "{out}");
         assert!(out.contains("</searchResult3>"), "{out}");
 

@@ -119,7 +119,11 @@ async fn start_pipeline(
     vtrack::set_status(&state.db, &track.id, "streaming", None).await?;
 
     tokio::fs::create_dir_all(&state.config.library.staging_dir).await?;
-    let staging_path = state.config.library.staging_dir.join(format!("{job_id}.src"));
+    let staging_path = state
+        .config
+        .library
+        .staging_dir
+        .join(format!("{job_id}.src"));
     jobs::set_staging_path(&state.db, &job_id, &staging_path.to_string_lossy()).await?;
 
     // Source of original-quality bytes: innertube direct HTTP when enabled
@@ -149,7 +153,16 @@ async fn start_pipeline(
         StreamFormat::Mp3 => (&["-c:a", "libmp3lame", "-f", "mp3"], "audio/mpeg"),
     };
     let mut ffmpeg = tokio::process::Command::new("ffmpeg")
-        .args(["-hide_banner", "-loglevel", "error", "-i", "pipe:0", "-vn", "-map", "a"])
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-i",
+            "pipe:0",
+            "-vn",
+            "-map",
+            "a",
+        ])
         .args(codec_args)
         // Push pages out as they're encoded instead of buffering ~1s —
         // shaves noticeable time off the first audible byte.
@@ -238,7 +251,11 @@ async fn start_pipeline(
 
         let staged_ok = matches!(&outcome, Ok(bytes) if *bytes > 0);
         if staged_ok {
-            tracing::info!(job = pump_job, bytes = outcome.as_ref().unwrap(), "staging complete");
+            tracing::info!(
+                job = pump_job,
+                bytes = outcome.as_ref().unwrap(),
+                "staging complete"
+            );
             let _ = jobs::set_status(&pump_state.db, &pump_job, "finalizing", None).await;
             let _ = vtrack::set_status(&pump_state.db, &pump_track_id, "staged", None).await;
         } else {
@@ -249,7 +266,8 @@ async fn start_pipeline(
             tracing::warn!(job = pump_job, %reason, "virtual stream failed");
             let _ = tokio::fs::remove_file(&pump_staging).await;
             let _ = jobs::set_status(&pump_state.db, &pump_job, "failed", Some(&reason)).await;
-            let _ = vtrack::set_status(&pump_state.db, &pump_track_id, "failed", Some(&reason)).await;
+            let _ =
+                vtrack::set_status(&pump_state.db, &pump_track_id, "failed", Some(&reason)).await;
         }
     });
 

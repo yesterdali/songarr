@@ -50,7 +50,9 @@ pub fn video_id(url: &str) -> Option<String> {
 }
 
 fn looks_like_id(s: &str) -> bool {
-    s.len() == 11 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    s.len() == 11
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
 /// Ask innertube for the best directly-fetchable audio format of a video.
@@ -59,8 +61,7 @@ pub async fn direct_audio(
     api_base: &str,
     watch_url: &str,
 ) -> anyhow::Result<DirectAudio> {
-    let id = video_id(watch_url)
-        .ok_or_else(|| anyhow::anyhow!("no video id in {watch_url}"))?;
+    let id = video_id(watch_url).ok_or_else(|| anyhow::anyhow!("no video id in {watch_url}"))?;
 
     let body = json!({
         "context": {
@@ -103,7 +104,9 @@ pub async fn direct_audio(
     anyhow::ensure!(
         status == "OK",
         "playability {status}: {}",
-        response["playabilityStatus"]["reason"].as_str().unwrap_or("")
+        response["playabilityStatus"]["reason"]
+            .as_str()
+            .unwrap_or("")
     );
 
     let formats = response["streamingData"]["adaptiveFormats"]

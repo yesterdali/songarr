@@ -45,7 +45,10 @@ pub async fn delete(pool: &SqlitePool, id: &str) -> sqlx::Result<()> {
         .map(|_| ())
 }
 
-pub async fn for_track(pool: &SqlitePool, virtual_track_id: &str) -> sqlx::Result<Vec<PendingAction>> {
+pub async fn for_track(
+    pool: &SqlitePool,
+    virtual_track_id: &str,
+) -> sqlx::Result<Vec<PendingAction>> {
     sqlx::query_as(
         "SELECT id, virtual_track_id, username, action, payload_json
          FROM pending_actions WHERE virtual_track_id = ? ORDER BY created_at",

@@ -43,7 +43,10 @@ async fn spawn_m3_proxy(deezer: &str, customize: impl FnOnce(&mut Config)) -> Te
 async fn virtual_id(proxy_url: &str) -> String {
     let body = fetch_json(
         proxy_url,
-        &format!("/rest/search3?{}&query=Mock+Artist", auth_query(Some("json"))),
+        &format!(
+            "/rest/search3?{}&query=Mock+Artist",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     body["subsonic-response"]["searchResult3"]["song"]
@@ -81,7 +84,14 @@ async fn wait_for_job_status(proxy: &TestProxy, status: &str) -> (String, String
 
 fn assert_ffprobe_codec(path: &std::path::Path, expected: &str) {
     let output = std::process::Command::new("ffprobe")
-        .args(["-v", "error", "-show_entries", "stream=codec_name", "-of", "csv=p=0"])
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "stream=codec_name",
+            "-of",
+            "csv=p=0",
+        ])
         .arg(path)
         .output()
         .expect("ffprobe runs");
@@ -112,7 +122,10 @@ async fn virtual_stream_plays_and_stages() {
         "audio/ogg"
     );
     assert_eq!(headers.get("accept-ranges").unwrap(), "none");
-    assert!(headers.get("content-length").is_none(), "length is unknowable");
+    assert!(
+        headers.get("content-length").is_none(),
+        "length is unknowable"
+    );
     assert!(body.starts_with(b"OggS"), "transcoded output is ogg/opus");
     assert!(body.len() > 100_000, "got {} bytes", body.len());
 
@@ -133,7 +146,10 @@ async fn virtual_stream_plays_and_stages() {
     .await
     .unwrap();
     assert_eq!(track_status, "staged");
-    assert!(score > 80, "perfect mock match should score high, got {score}");
+    assert!(
+        score > 80,
+        "perfect mock match should score high, got {score}"
+    );
 }
 
 #[tokio::test]
@@ -187,7 +203,11 @@ async fn disconnect_mid_play_still_completes_staging() {
     // The acquisition must finish in the background.
     let (_job, staging_path) = wait_for_job_status(&proxy, "finalizing").await;
     for _ in 0..100 {
-        if std::fs::metadata(&staging_path).map(|m| m.len()).unwrap_or(0) == fixture_size() {
+        if std::fs::metadata(&staging_path)
+            .map(|m| m.len())
+            .unwrap_or(0)
+            == fixture_size()
+        {
             break;
         }
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -285,7 +305,10 @@ async fn lyrics_for_virtual_id_is_empty_success() {
 
     let body = fetch_json(
         &proxy.url,
-        &format!("/rest/getLyricsBySongId?{}&id={id}", auth_query(Some("json"))),
+        &format!(
+            "/rest/getLyricsBySongId?{}&id={id}",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     assert_eq!(body["subsonic-response"]["status"], "ok");
@@ -416,7 +439,11 @@ async fn innertube_failure_falls_back_to_ytdlp() {
         &format!("/rest/stream?{}&id={id}", auth_query(None)),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "fallback must keep streaming working");
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "fallback must keep streaming working"
+    );
     assert!(body.starts_with(b"OggS"));
     let (_job, staging_path) = wait_for_job_status(&proxy, "finalizing").await;
     assert_eq!(

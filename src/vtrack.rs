@@ -172,14 +172,16 @@ pub async fn set_status(
     status: &str,
     fail_reason: Option<&str>,
 ) -> sqlx::Result<()> {
-    sqlx::query("UPDATE virtual_tracks SET status = ?, fail_reason = ?, updated_at = ? WHERE id = ?")
-        .bind(status)
-        .bind(fail_reason)
-        .bind(now_utc())
-        .bind(id)
-        .execute(pool)
-        .await
-        .map(|_| ())
+    sqlx::query(
+        "UPDATE virtual_tracks SET status = ?, fail_reason = ?, updated_at = ? WHERE id = ?",
+    )
+    .bind(status)
+    .bind(fail_reason)
+    .bind(now_utc())
+    .bind(id)
+    .execute(pool)
+    .await
+    .map(|_| ())
 }
 
 pub fn now_utc() -> String {
@@ -217,7 +219,9 @@ mod tests {
         let id = new_virtual_id();
         assert_eq!(id.len(), ID_PREFIX.len() + 22);
         assert!(is_virtual_id(&id));
-        assert!(id[ID_PREFIX.len()..].chars().all(|c| c.is_ascii_alphanumeric()));
+        assert!(id[ID_PREFIX.len()..]
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric()));
         assert_ne!(id, new_virtual_id());
     }
 

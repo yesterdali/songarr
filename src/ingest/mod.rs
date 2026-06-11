@@ -55,8 +55,8 @@ async fn tick(state: &AppState) -> anyhow::Result<()> {
             }
             Err(error) => {
                 tracing::error!(%error, job = job_id, "ingest failed");
-                let _ = jobs::set_status(&state.db, &job_id, "failed", Some(&error.to_string()))
-                    .await;
+                let _ =
+                    jobs::set_status(&state.db, &job_id, "failed", Some(&error.to_string())).await;
             }
         }
     }
@@ -149,7 +149,10 @@ async fn ingest_job_inner(
         &state.config.library.music_dir,
         &state.config.library.ingest_subdir,
         &track,
-        final_file.extension().and_then(|e| e.to_str()).unwrap_or("opus"),
+        final_file
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("opus"),
     );
     tokio::fs::create_dir_all(dest.parent().unwrap()).await?;
     move_file(&final_file, &dest).await?;
@@ -190,7 +193,17 @@ async fn remux(source: &str, scratch_dir: &Path, job_id: &str) -> anyhow::Result
 
     let target = scratch_dir.join(format!("{job_id}.final.{ext}"));
     let output = tokio::process::Command::new("ffmpeg")
-        .args(["-hide_banner", "-loglevel", "error", "-y", "-i", source, "-vn", "-map", "a"])
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            source,
+            "-vn",
+            "-map",
+            "a",
+        ])
         .args(codec_args)
         .arg(&target)
         .output()
@@ -338,9 +351,10 @@ async fn trigger_scan_and_wait(state: &AppState) -> anyhow::Result<()> {
 /// preferring hits whose path lives under the ingest subdir.
 async fn find_real_id(state: &AppState, track: &VirtualTrack) -> anyhow::Result<String> {
     let base = state.config.navidrome.base_url.trim_end_matches('/');
-    let query: String =
-        url::form_urlencoded::byte_serialize(format!("{} {}", track.artist, track.title).as_bytes())
-            .collect();
+    let query: String = url::form_urlencoded::byte_serialize(
+        format!("{} {}", track.artist, track.title).as_bytes(),
+    )
+    .collect();
 
     for attempt in 0..10 {
         let url = format!(
@@ -399,7 +413,12 @@ async fn replay_pending(state: &AppState, virtual_track_id: &str, real_id: &str)
             return;
         }
     };
-    let base = state.config.navidrome.base_url.trim_end_matches('/').to_string();
+    let base = state
+        .config
+        .navidrome
+        .base_url
+        .trim_end_matches('/')
+        .to_string();
 
     for action in actions {
         let replayed = async {
@@ -487,7 +506,10 @@ mod tests {
     #[test]
     fn sanitize_handles_separators_and_reserved_chars() {
         assert_eq!(sanitize_filename("AC/DC"), "AC_DC");
-        assert_eq!(sanitize_filename("What? When: Where*"), "What_ When_ Where_");
+        assert_eq!(
+            sanitize_filename("What? When: Where*"),
+            "What_ When_ Where_"
+        );
         assert_eq!(sanitize_filename("...dots..."), "dots");
         assert_eq!(sanitize_filename("   "), "Unknown");
         assert_eq!(sanitize_filename("Ünïcødé"), "Ünïcødé");

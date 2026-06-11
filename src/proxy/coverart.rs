@@ -107,12 +107,18 @@ mod tests {
 
     #[test]
     fn sniffs_common_image_types() {
-        assert_eq!(sniff_image_content_type(&[0xFF, 0xD8, 0xFF, 0xE0]), "image/jpeg");
+        assert_eq!(
+            sniff_image_content_type(&[0xFF, 0xD8, 0xFF, 0xE0]),
+            "image/jpeg"
+        );
         assert_eq!(
             sniff_image_content_type(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A]),
             "image/png"
         );
         assert_eq!(sniff_image_content_type(b"RIFF0000WEBPVP8 "), "image/webp");
-        assert_eq!(sniff_image_content_type(b"nonsense"), "application/octet-stream");
+        assert_eq!(
+            sniff_image_content_type(b"nonsense"),
+            "application/octet-stream"
+        );
     }
 }

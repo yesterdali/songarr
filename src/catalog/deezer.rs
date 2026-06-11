@@ -72,10 +72,26 @@ pub async fn search(
             album: t.album.as_ref().map(|a| a.title.clone()),
             duration_ms: t.duration.map(|s| s * 1000),
             isrc: None,
-            artwork_url: t
-                .album
-                .and_then(|a| a.cover_xl.or(a.cover_big)),
+            artwork_url: t.album.and_then(|a| a.cover_xl.or(a.cover_big)),
         })
+        .collect())
+}
+
+/// Top tracks for an artist via the advanced search syntax
+/// (`q=artist:"NAME"` returns that artist's tracks ranked by popularity).
+/// Caller still dedups/filters; we only drop obvious other-artist hits.
+pub async fn top_tracks(
+    http: &reqwest::Client,
+    api_base: &str,
+    artist: &str,
+    limit: u32,
+) -> anyhow::Result<Vec<CatalogTrack>> {
+    let query = format!("artist:\"{}\"", artist.replace('"', ""));
+    let tracks = search(http, api_base, &query, limit).await?;
+    let wanted = artist.to_lowercase();
+    Ok(tracks
+        .into_iter()
+        .filter(|t| t.artist.to_lowercase() == wanted)
         .collect())
 }
 

@@ -231,3 +231,55 @@ tv_embedded/web_embedded still stream and they're no faster.
 
 Verified: 34 unit; all four integration suites green (incl. innertube direct
 path against the strict mock, fallback, and proxy-arg passthrough).
+
+## R1 — Song radio via YTM recommendations (2026-06-11)
+
+Done: wired `getSimilarSongs`, `getSimilarSongs2`, and `getTopSongs` into
+the proxy. Real seeds merge Navidrome's own response with YTM candidates;
+virtual seeds synthesize a normal Subsonic success response. YTM radio uses
+`youtubei/v1/next` with the `RDAMVM{videoId}` automix playlist id; top songs
+use YTM search. Candidates are upserted as stable `ytmusic` virtual tracks
+and their video ids are stored immediately in the resolution cache, so
+playing a recommendation skips the yt-dlp search round-trip. Provider
+failures fall back to vanilla Navidrome for real seeds and empty OK lists for
+virtual seeds.
+
+Verified: new self-contained `tests/recommendations.rs` with mock Navidrome,
+mock YTM, and mock yt-dlp covers virtual-seed radio, playable pre-resolved
+recommendations, real-seed merge/dedup, `getTopSongs`, and provider fallback.
+`cargo test` green for all non-ignored tests; Docker-harness suites remain
+ignored unless `tests/harness/up.sh` is running.
+
+## R2 — Recommendation ensemble, cache, anti-repeat (2026-06-11)
+
+Done: added the R2 voting layer over YTM, Deezer, and optional Last.fm.
+Sources are weighted by config, individually cached in `rec_cache`, and
+merged by normalized artist/title so multi-source agreement outranks a
+single high-ranked source. Deezer participates as a no-auth source and as a
+best-effort canonicalization pass for metadata/artwork; Last.fm is disabled
+unless `lastfm_api_key` is set. Results are filtered through `rec_shown`
+per user using `shown_cooldown_days`, so repeated radio fetches avoid recent
+recommendation repeats. Candidates without a pre-known YouTube id still
+become playable virtual tracks and resolve through the normal M3 yt-dlp path
+when played.
+
+Verified: R2 tests cover consensus ranking, disabled weights, metadata
+preference, Last.fm response caching, top-song ensemble merging, provider
+fallback, and shown-cooldown suppression. `cargo test` green for all
+non-ignored tests.
+
+## R3 — Listens and synthetic discovery playlist (2026-06-11)
+
+Done: `scrobble` now records listens for both virtual and real ids in the
+`listens` table (virtual metadata from Songarr, real metadata via admin
+`getSong` before passthrough). Added a synthetic `Songarr Discovery`
+playlist by intercepting `getPlaylists` and `getPlaylist`: clients see a
+normal playlist with id `songarr_discovery`, and entries are generated lazily
+from the user's recent distinct listens through the R2 ensemble. This gives
+desktop clients like Feishin a playlist-shaped discovery surface without
+requiring a special radio UI.
+
+Verified: R3 tests cover virtual and real scrobble listen logging, discovery
+playlist injection in `getPlaylists`, JSON/XML `getPlaylist` rendering, and
+virtual recommendation entries inside the playlist. `cargo test` green for
+all non-ignored tests.

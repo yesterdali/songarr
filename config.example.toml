@@ -37,6 +37,16 @@ auto_import = true              # move played tracks into /music
 min_score_for_import = 80       # candidate match score gate
 write_playlist = "Songarr Played.m3u"  # optional rolling playlist of imports, "" disables
 
+[recommendations]
+enabled = true                  # getSimilarSongs/getSimilarSongs2/getTopSongs via R2 ensemble
+max_results = 20
+shown_cooldown_days = 7
+cache_ttl_hours = 72
+weight_ytm = 1.0
+weight_deezer = 0.6
+weight_lastfm = 0.8             # requires lastfm_api_key
+lastfm_api_key = ""
+
 [upgrade]
 mode = "none"                   # none | soulsync_wishlist (best-effort, see M6)
 soulsync_url = "http://soulsync:8888"

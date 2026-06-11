@@ -51,7 +51,10 @@ async fn search3_appends_virtual_songs_json_and_xml() {
     // JSON: local songs first, then virtual ones with full synthesized fields.
     let body = fetch_json(
         &proxy,
-        &format!("/rest/search3?{}&query=Mock+Artist", auth_query(Some("json"))),
+        &format!(
+            "/rest/search3?{}&query=Mock+Artist",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     let songs = songs_of(&body);
@@ -107,7 +110,10 @@ async fn virtual_ids_are_stable_across_searches() {
     for _ in 0..2 {
         let body = fetch_json(
             &proxy,
-            &format!("/rest/search3?{}&query=Mock+Artist", auth_query(Some("json"))),
+            &format!(
+                "/rest/search3?{}&query=Mock+Artist",
+                auth_query(Some("json"))
+            ),
         )
         .await;
         let id = songs_of(&body)
@@ -131,7 +137,10 @@ async fn local_tracks_are_not_duplicated() {
     // "Tone" returns the real seeded "Tone 220 Hz"; the mock also offers it.
     let body = fetch_json(
         &proxy,
-        &format!("/rest/search3?{}&query=Tone&songCount=30", auth_query(Some("json"))),
+        &format!(
+            "/rest/search3?{}&query=Tone&songCount=30",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     let songs = songs_of(&body);
@@ -139,7 +148,11 @@ async fn local_tracks_are_not_duplicated() {
         .iter()
         .filter(|s| s["title"] == "Tone 220 Hz")
         .collect();
-    assert_eq!(tone_entries.len(), 1, "no duplicate of a local track: {body}");
+    assert_eq!(
+        tone_entries.len(),
+        1,
+        "no duplicate of a local track: {body}"
+    );
     assert!(
         !tone_entries[0]["id"].as_str().unwrap().starts_with("sgr_"),
         "the local track wins"
@@ -166,11 +179,16 @@ async fn denied_users_and_short_queries_get_vanilla_results() {
     .await;
     let body = fetch_json(
         &denying_proxy,
-        &format!("/rest/search3?{}&query=Mock+Artist", auth_query(Some("json"))),
+        &format!(
+            "/rest/search3?{}&query=Mock+Artist",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     assert!(
-        songs_of(&body).iter().all(|s| !s["id"].as_str().unwrap_or("").starts_with("sgr_")),
+        songs_of(&body)
+            .iter()
+            .all(|s| !s["id"].as_str().unwrap_or("").starts_with("sgr_")),
         "denied user must see vanilla results: {body}"
     );
 
@@ -181,7 +199,9 @@ async fn denied_users_and_short_queries_get_vanilla_results() {
     )
     .await;
     assert!(
-        songs_of(&body).iter().all(|s| !s["id"].as_str().unwrap_or("").starts_with("sgr_")),
+        songs_of(&body)
+            .iter()
+            .all(|s| !s["id"].as_str().unwrap_or("").starts_with("sgr_")),
         "below min_query_len no injection happens: {body}"
     );
 }
@@ -196,7 +216,10 @@ async fn get_song_synthesizes_virtual_and_errors_on_unknown() {
 
     let body = fetch_json(
         &proxy,
-        &format!("/rest/search3?{}&query=Mock+Artist", auth_query(Some("json"))),
+        &format!(
+            "/rest/search3?{}&query=Mock+Artist",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     let virtual_id = songs_of(&body)
@@ -254,7 +277,10 @@ async fn get_cover_art_serves_and_caches_virtual_artwork() {
 
     let body = fetch_json(
         &proxy,
-        &format!("/rest/search3?{}&query=Mock+Artist", auth_query(Some("json"))),
+        &format!(
+            "/rest/search3?{}&query=Mock+Artist",
+            auth_query(Some("json"))
+        ),
     )
     .await;
     let cover_id = songs_of(&body)

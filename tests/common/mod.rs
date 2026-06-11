@@ -68,10 +68,7 @@ impl TestProxy {
     }
 }
 
-pub async fn spawn_proxy_handle(
-    upstream: &str,
-    customize: impl FnOnce(&mut Config),
-) -> TestProxy {
+pub async fn spawn_proxy_handle(upstream: &str, customize: impl FnOnce(&mut Config)) -> TestProxy {
     spawn_proxy_inner(upstream, customize, false).await
 }
 
@@ -147,7 +144,9 @@ pub async fn fetch_json(base: &str, path_and_query: &str) -> serde_json::Value {
 }
 
 /// Fake JPEG payload (magic bytes + filler) served by the mock Deezer.
-pub const FAKE_JPEG: &[u8] = &[0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0xD9];
+pub const FAKE_JPEG: &[u8] = &[
+    0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, b'J', b'F', b'I', b'F', 0xD9,
+];
 
 /// Mock api.deezer.com: /search returns two fixed tracks (one colliding
 /// with the seeded library for dedup tests), /art/{id} serves fake artwork

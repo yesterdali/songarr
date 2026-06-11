@@ -5,6 +5,7 @@ pub mod ingest;
 pub mod jobs;
 pub mod pending;
 pub mod proxy;
+pub mod recs;
 pub mod resolve;
 pub mod subsonic;
 pub mod vtrack;
@@ -143,6 +144,27 @@ pub fn build_app(state: AppState) -> Router {
     let router = intercept!(router, "getCoverArt", proxy::coverart::handler);
     let router = intercept!(router, "stream", proxy::stream::handler);
     let router = intercept!(router, "download", proxy::stream::handler);
+    let router = intercept!(
+        router,
+        "getSimilarSongs",
+        proxy::similar::similar_songs_handler
+    );
+    let router = intercept!(
+        router,
+        "getSimilarSongs2",
+        proxy::similar::similar_songs2_handler
+    );
+    let router = intercept!(router, "getTopSongs", proxy::similar::top_songs_handler);
+    let router = intercept!(
+        router,
+        "getPlaylists",
+        proxy::playlists::get_playlists_handler
+    );
+    let router = intercept!(
+        router,
+        "getPlaylist",
+        proxy::playlists::get_playlist_handler
+    );
     let router = intercept!(router, "scrobble", proxy::scrobble::scrobble_handler);
     let router = intercept!(router, "star", proxy::scrobble::star_handler);
     let router = intercept!(router, "unstar", proxy::scrobble::unstar_handler);
