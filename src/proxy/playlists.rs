@@ -157,23 +157,15 @@ async fn seed_track_from_listen(state: &AppState, seed: crate::recs::ListenSeed)
             }
         }
     }
-    let id = seed.subsonic_id.clone().unwrap_or_else(|| {
-        format!(
-            "listen:{}",
-            crate::recs::song_key(&seed.artist, &seed.title)
-        )
-    });
+    let provider_track_id = seed
+        .subsonic_id
+        .clone()
+        .unwrap_or_else(|| format!("listen:{}", crate::recs::song_key(&seed.artist, &seed.title)));
     SeedTrack {
-        provider_track_id: id.clone(),
-        id,
         artist: seed.artist,
         title: seed.title,
-        duration_ms: None,
         provider: "listen".into(),
-        resolved_url: None,
-        resolved_score: None,
-        resolved_title: None,
-        resolved_at_epoch: None,
+        provider_track_id,
     }
 }
 

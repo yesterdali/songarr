@@ -27,7 +27,21 @@ pub fn merge_sources(sources: Vec<SourceCandidates>, limit: usize) -> Vec<RecCan
 
     let mut merged: HashMap<String, Merged> = HashMap::new();
     for source in sources.into_iter().filter(|s| s.weight > 0.0) {
-        for (rank, candidate) in source.candidates.into_iter().enumerate() {
+        // Clean and filter before keying so cruft variants ("Tell Me (Official
+        // Video)") vote together with the clean track, and alternate edits
+        // (slowed/reverb/parody) never compete for slots at all.
+        let cleaned: Vec<RecCandidate> = source
+            .candidates
+            .into_iter()
+            .filter(|c| !super::is_junk_version(&c.title))
+            .map(|mut c| {
+                c.title = super::clean_title(&c.title);
+                c.title = super::strip_artist_prefix(&c.title, &c.artist);
+                c
+            })
+            .filter(|c| !c.title.trim().is_empty())
+            .collect();
+        for (rank, candidate) in cleaned.into_iter().enumerate() {
             let key = candidate.song_key();
             if key == "|" {
                 continue;

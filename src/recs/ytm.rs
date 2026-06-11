@@ -63,13 +63,18 @@ pub async fn radio(
     Ok(candidates)
 }
 
-/// Fetch top-ish songs for an artist through YouTube Music search. YTM's
-/// exact ranking is opaque; for R1 this gives us a no-auth source that
-/// clients can browse through `getTopSongs`.
-pub async fn top_songs(
+/// "Songs" results filter for `youtubei/v1/search`. Best-effort: if YTM
+/// rotates it, parse failure just removes this source for the request.
+const SONGS_FILTER_PARAMS: &str = "EgWKAQIIAWoKEAMQBBAJEAoQBQ==";
+
+/// YouTube Music song search → candidates carrying real *music* video ids.
+/// Used both for `getTopSongs` (query = artist) and to find a clean radio
+/// seed for a non-YTM track (a plain-YouTube id would seed YouTube autoplay,
+/// not YT Music radio — see `proxy::similar::seed_video_id`).
+pub async fn song_search(
     http: &reqwest::Client,
     api_base: &str,
-    artist: &str,
+    query: &str,
     limit: usize,
 ) -> anyhow::Result<Vec<RecCandidate>> {
     let body = json!({
@@ -81,10 +86,8 @@ pub async fn top_songs(
                 "gl": "US"
             }
         },
-        "query": artist,
-        // Songs filter. Kept best-effort: if YTM rotates this, parse failure
-        // only removes this voter for the request.
-        "params": "EgWKAQIIAWoKEAMQBBAJEAoQBQ%3D%3D"
+        "query": query,
+        "params": SONGS_FILTER_PARAMS
     });
 
     let response: Value = http
@@ -107,9 +110,20 @@ pub async fn top_songs(
     let candidates = parse_search_results(&response, limit);
     anyhow::ensure!(
         !candidates.is_empty(),
-        "top songs search empty (schema rotated?)"
+        "song search empty (schema rotated?)"
     );
     Ok(candidates)
+}
+
+/// Fetch top-ish songs for an artist through YouTube Music search. YTM's
+/// exact ranking is opaque; this gives a no-auth source for `getTopSongs`.
+pub async fn top_songs(
+    http: &reqwest::Client,
+    api_base: &str,
+    artist: &str,
+    limit: usize,
+) -> anyhow::Result<Vec<RecCandidate>> {
+    song_search(http, api_base, artist, limit).await
 }
 
 /// Collect every `playlistPanelVideoRenderer` anywhere in the response.

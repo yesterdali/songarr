@@ -38,33 +38,23 @@ impl RecKind {
     }
 }
 
+/// The minimum a seed needs to fan out to providers: who/what to look up, and
+/// the provider identity that lets a ytmusic seed skip the YTM song search.
 #[derive(Debug, Clone)]
 pub(crate) struct SeedTrack {
-    pub id: String,
     pub artist: String,
     pub title: String,
-    pub duration_ms: Option<i64>,
     pub provider: String,
     pub provider_track_id: String,
-    pub resolved_url: Option<String>,
-    pub resolved_score: Option<i64>,
-    pub resolved_title: Option<String>,
-    pub resolved_at_epoch: Option<i64>,
 }
 
 impl From<VirtualTrack> for SeedTrack {
     fn from(track: VirtualTrack) -> Self {
         Self {
-            id: track.id,
             artist: track.artist,
             title: track.title,
-            duration_ms: track.duration_ms,
             provider: track.provider,
             provider_track_id: track.provider_track_id,
-            resolved_url: track.resolved_url,
-            resolved_score: track.resolved_score,
-            resolved_title: track.resolved_title,
-            resolved_at_epoch: track.resolved_at_epoch,
         }
     }
 }
@@ -519,36 +509,27 @@ async fn canonicalize_candidate(state: &AppState, candidate: RecCandidate) -> Re
     }
 }
 
+/// Find a YouTube *Music* video id to seed a radio from. A YTM radio is only
+/// as good as its seed: a plain-YouTube id (what yt-dlp search yields, and
+/// what a non-YTM track's `resolved_url` holds) seeds the YouTube *autoplay*
+/// queue — official-video/slowed+reverb/parody uploads — instead of a clean
+/// YT Music radio. So ytmusic-origin seeds use their music id directly, and
+/// everything else is resolved to one via a YTM song search.
 async fn seed_video_id(state: &AppState, seed: &SeedTrack) -> anyhow::Result<String> {
     if seed.provider == YTM_PROVIDER && !seed.provider_track_id.is_empty() {
         return Ok(seed.provider_track_id.clone());
     }
-    if let Some(url) = &seed.resolved_url {
-        if let Some(id) = video_id_from_url(url) {
-            return Ok(id);
-        }
-    }
-
-    let temp = VirtualTrack {
-        id: seed.id.clone(),
-        provider: seed.provider.clone(),
-        provider_track_id: seed.provider_track_id.clone(),
-        artist: seed.artist.clone(),
-        title: seed.title.clone(),
-        album: None,
-        duration_ms: seed.duration_ms,
-        isrc: None,
-        artwork_url: None,
-        status: "virtual".into(),
-        real_subsonic_id: None,
-        resolved_url: seed.resolved_url.clone(),
-        resolved_score: seed.resolved_score,
-        resolved_title: seed.resolved_title.clone(),
-        resolved_at_epoch: seed.resolved_at_epoch,
-    };
-    let resolution = crate::resolve::resolve(&state.config.streaming, &temp).await?;
-    video_id_from_url(&resolution.url)
-        .ok_or_else(|| anyhow::anyhow!("resolved URL did not contain a YouTube video id"))
+    let query = format!("{} {}", seed.artist, seed.title);
+    let hits = crate::recs::ytm::song_search(
+        &state.yt_http,
+        &state.config.recommendations.ytm_api_base,
+        &query,
+        1,
+    )
+    .await?;
+    hits.into_iter()
+        .find_map(|candidate| candidate.video_id)
+        .ok_or_else(|| anyhow::anyhow!("no YTM song match to seed radio for {query}"))
 }
 
 async fn fetch_real_seed(state: &AppState, id: &str) -> anyhow::Result<SeedTrack> {
@@ -575,16 +556,10 @@ async fn fetch_real_seed(state: &AppState, id: &str) -> anyhow::Result<SeedTrack
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("getSong response missing title"))?;
     Ok(SeedTrack {
-        id: id.to_string(),
         artist: artist.to_string(),
         title: title.to_string(),
-        duration_ms: song["duration"].as_i64().map(|s| s * 1000),
         provider: "navidrome".into(),
         provider_track_id: id.to_string(),
-        resolved_url: None,
-        resolved_score: None,
-        resolved_title: None,
-        resolved_at_epoch: None,
     })
 }
 
@@ -666,20 +641,6 @@ fn watch_url(video_id: &str) -> String {
     format!("https://www.youtube.com/watch?v={video_id}")
 }
 
-fn video_id_from_url(raw: &str) -> Option<String> {
-    let url = url::Url::parse(raw).ok()?;
-    if url.domain().is_some_and(|d| d.ends_with("youtu.be")) {
-        return url
-            .path_segments()
-            .and_then(|mut segments| segments.next())
-            .filter(|s| !s.is_empty())
-            .map(str::to_string);
-    }
-    url.query_pairs()
-        .find(|(key, _)| key == "v")
-        .map(|(_, value)| value.into_owned())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,18 +677,5 @@ mod tests {
             Some(songs_payload("similarSongs2", vec![entry("sgr_x", "A")])),
         );
         assert_eq!(response.status(), axum::http::StatusCode::OK);
-    }
-
-    #[test]
-    fn extracts_youtube_video_ids() {
-        assert_eq!(
-            video_id_from_url("https://www.youtube.com/watch?v=abc123&feature=share").as_deref(),
-            Some("abc123")
-        );
-        assert_eq!(
-            video_id_from_url("https://youtu.be/xyz987").as_deref(),
-            Some("xyz987")
-        );
-        assert!(video_id_from_url("https://example.com/nope").is_none());
     }
 }

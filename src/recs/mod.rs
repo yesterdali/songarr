@@ -56,6 +56,93 @@ pub fn normalize(value: &str) -> String {
         .collect()
 }
 
+/// Alternate-version markers that make a candidate a different (unwanted)
+/// track, not just a noisy title. These get DROPPED — both YouTube uploads
+/// (slowed+reverb, nightcore, parodies) and the slowed/sped releases Deezer
+/// genuinely carries in an artist's catalog.
+const JUNK_MARKERS: &[&str] = &[
+    "slowed", "sped up", "spedup", "reverb", "nightcore", "8d audio", "8daudio",
+    "bass boost", "bassboost", "karaoke", "parody", "parodi",
+];
+
+/// True if the title is an alternate edit we don't want surfaced as a rec.
+pub fn is_junk_version(title: &str) -> bool {
+    let lower = title.to_lowercase();
+    let translit = deunicode::deunicode(&lower);
+    lower.contains("пародия")
+        || JUNK_MARKERS
+            .iter()
+            .any(|m| lower.contains(m) || translit.contains(m))
+}
+
+/// Bracketed descriptors that are video-upload cruft, not part of the song
+/// name. A `(...)`/`[...]` group is dropped only when it contains one of
+/// these — legit qualifiers like (feat. …), (Remix), (Live), (Acoustic) are
+/// kept because none of these words appear in them.
+const TITLE_CRUFT: &[&str] = &[
+    "official", "lyric", "lyrics", "visualizer", "video", "audio", "m/v", "mv",
+    "dir. by", "dir by", "subtitle", "eng sub", "hd", "hq", "4k",
+];
+
+/// Strip video-upload noise from a title so it matches the real track:
+/// "Tell Me (Official Video)" → "Tell Me", "Song [Audio]" → "Song",
+/// "Track - Topic" → "Track". Leaves legitimate parentheticals alone.
+pub fn clean_title(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        let close = match c {
+            '(' => Some(')'),
+            '[' => Some(']'),
+            _ => None,
+        };
+        let Some(close) = close else {
+            out.push(c);
+            continue;
+        };
+        let mut inner = String::new();
+        let mut depth = 1;
+        for n in chars.by_ref() {
+            if n == c {
+                depth += 1;
+            } else if n == close {
+                depth -= 1;
+                if depth == 0 {
+                    break;
+                }
+            }
+            inner.push(n);
+        }
+        let low = inner.to_lowercase();
+        if TITLE_CRUFT.iter().any(|k| low.contains(k)) {
+            continue; // drop the whole cruft group
+        }
+        out.push(c);
+        out.push_str(&inner);
+        out.push(close);
+    }
+    let mut s = out.trim().to_string();
+    if s.to_lowercase().ends_with(" - topic") {
+        s.truncate(s.len() - " - topic".len());
+    }
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Drop a leading "Artist - " when it duplicates the known artist — common in
+/// channel-sourced uploads ("Motorama — Tell Me" by Motorama → "Tell Me").
+/// Only strips when the prefix matches the artist, so real titles containing
+/// a dash are left intact.
+pub fn strip_artist_prefix(title: &str, artist: &str) -> String {
+    for sep in [" — ", " – ", " - "] {
+        if let Some((prefix, rest)) = title.split_once(sep) {
+            if !rest.trim().is_empty() && normalize(prefix) == normalize(artist) {
+                return rest.trim().to_string();
+            }
+        }
+    }
+    title.trim().to_string()
+}
+
 pub async fn cache_get(
     pool: &SqlitePool,
     source: &str,
@@ -301,6 +388,39 @@ mod tests {
         assert_eq!(seeds.len(), 2);
         assert_eq!(seeds[0].title, "First");
         assert_eq!(seeds[1].title, "Second");
+    }
+
+    #[test]
+    fn junk_versions_are_detected_across_scripts() {
+        assert!(is_junk_version("MEMORIZING (SUPER SLOWED)"));
+        assert!(is_junk_version("Monolith (Slowed + Reverb)"));
+        assert!(is_junk_version("Track (sped up)"));
+        assert!(is_junk_version("Песня (Пародия)"));
+        assert!(!is_junk_version("Tell Me"));
+        assert!(!is_junk_version("Song (Remix)"));
+        assert!(!is_junk_version("Live at Wembley"));
+    }
+
+    #[test]
+    fn clean_title_strips_video_cruft_but_keeps_qualifiers() {
+        assert_eq!(clean_title("Tell Me (Official Video)"), "Tell Me");
+        assert_eq!(clean_title("Sudno [Official Lyric Video]"), "Sudno");
+        assert_eq!(clean_title("Song (Audio)"), "Song");
+        assert_eq!(clean_title("Whatever - Topic"), "Whatever");
+        // legit parentheticals survive
+        assert_eq!(clean_title("Crew Love (feat. Drake)"), "Crew Love (feat. Drake)");
+        assert_eq!(clean_title("Closer (Remix)"), "Closer (Remix)");
+    }
+
+    #[test]
+    fn strip_artist_prefix_only_when_it_matches() {
+        assert_eq!(strip_artist_prefix("Motorama — Tell Me", "Motorama"), "Tell Me");
+        assert_eq!(strip_artist_prefix("Motorama - Tell Me", "Motorama"), "Tell Me");
+        // wrong/channel artist: leave the title untouched rather than corrupt it
+        assert_eq!(
+            strip_artist_prefix("Наутилус Помпилиус - Крылья", "StarPro"),
+            "Наутилус Помпилиус - Крылья"
+        );
     }
 
     #[tokio::test]
