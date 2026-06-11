@@ -217,19 +217,53 @@ pub async fn recent_listen_seeds(
     Ok(seeds)
 }
 
-pub async fn discovery_cache_get(
+/// The discovery playlist is cached as the list of resulting `sgr_` track ids
+/// (the tracks themselves are already persisted, so re-reading them by id is
+/// cheap and survives metadata changes). This is what keeps `getPlaylists` —
+/// which clients poll constantly — from regenerating recommendations on every
+/// call; generation happens at most once per TTL.
+pub async fn discovery_ids_get(
     pool: &SqlitePool,
     username: &str,
-) -> sqlx::Result<Option<Vec<RecCandidate>>> {
-    cache_get(pool, "discovery", username, 6 * 24).await
+    ttl_hours: u32,
+) -> sqlx::Result<Option<Vec<String>>> {
+    if username.is_empty() || ttl_hours == 0 {
+        return Ok(None);
+    }
+    let row: Option<(String, i64)> = sqlx::query_as(
+        "SELECT payload_json, fetched_at_epoch FROM rec_cache WHERE source = 'discovery' AND seed_key = ?",
+    )
+    .bind(username)
+    .fetch_optional(pool)
+    .await?;
+    let Some((payload, fetched_at)) = row else {
+        return Ok(None);
+    };
+    if crate::vtrack::epoch_secs() - fetched_at > i64::from(ttl_hours) * 3600 {
+        return Ok(None);
+    }
+    Ok(serde_json::from_str(&payload).ok())
 }
 
-pub async fn discovery_cache_set(
+pub async fn discovery_ids_set(
     pool: &SqlitePool,
     username: &str,
-    candidates: &[RecCandidate],
+    track_ids: &[String],
 ) -> sqlx::Result<()> {
-    cache_set(pool, "discovery", username, candidates).await
+    let payload = serde_json::to_string(track_ids).unwrap_or_else(|_| "[]".into());
+    sqlx::query(
+        "INSERT INTO rec_cache (source, seed_key, payload_json, fetched_at_epoch)
+         VALUES ('discovery', ?, ?, ?)
+         ON CONFLICT(source, seed_key) DO UPDATE SET
+            payload_json = excluded.payload_json,
+            fetched_at_epoch = excluded.fetched_at_epoch",
+    )
+    .bind(username)
+    .bind(payload)
+    .bind(crate::vtrack::epoch_secs())
+    .execute(pool)
+    .await
+    .map(|_| ())
 }
 
 #[cfg(test)]
@@ -267,5 +301,22 @@ mod tests {
         assert_eq!(seeds.len(), 2);
         assert_eq!(seeds[0].title, "First");
         assert_eq!(seeds[1].title, "Second");
+    }
+
+    #[tokio::test]
+    async fn discovery_ids_round_trip_and_respect_ttl() {
+        let pool = crate::db::init(
+            &std::env::temp_dir()
+                .join(format!("songarr-disc-{}", uuid::Uuid::new_v4()))
+                .join("t.db"),
+        )
+        .await
+        .unwrap();
+        let ids = vec!["sgr_a".to_string(), "sgr_b".to_string()];
+        discovery_ids_set(&pool, "u", &ids).await.unwrap();
+        assert_eq!(discovery_ids_get(&pool, "u", 24).await.unwrap(), Some(ids));
+        // ttl_hours = 0 disables the cache; empty username never caches.
+        assert_eq!(discovery_ids_get(&pool, "u", 0).await.unwrap(), None);
+        assert_eq!(discovery_ids_get(&pool, "", 24).await.unwrap(), None);
     }
 }

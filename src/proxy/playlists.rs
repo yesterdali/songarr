@@ -16,6 +16,10 @@ use super::{passthrough, search};
 
 pub const DISCOVERY_ID: &str = "songarr_discovery";
 const DISCOVERY_NAME: &str = "Songarr Discovery";
+/// How long a generated discovery list is reused before regenerating. Keeps
+/// the frequently-polled `getPlaylists`/`getPlaylist` off the provider APIs;
+/// matches the "weekly discovery" intent in songarr-recs-plan.md.
+const DISCOVERY_TTL_HOURS: u32 = 6 * 24;
 
 pub async fn get_playlists_handler(State(state): State<AppState>, req: Request) -> Response {
     if !state.config.recommendations.enabled {
@@ -86,7 +90,37 @@ pub async fn get_playlist_handler(State(state): State<AppState>, req: Request) -
         .render_ok(format, Some(playlist_payload(summary, entries)))
 }
 
+/// Discovery entries, served from the per-user cache when fresh. A cache miss
+/// generates (the expensive provider/yt-dlp work) and stores the resulting
+/// track ids; empty results are not cached, so a user who just started
+/// listening isn't locked into an empty playlist for the whole TTL.
 async fn discovery_entries(state: &AppState, username: &str) -> anyhow::Result<Vec<SongEntry>> {
+    if let Ok(Some(ids)) =
+        crate::recs::discovery_ids_get(&state.db, username, DISCOVERY_TTL_HOURS).await
+    {
+        return Ok(load_entries(state, &ids).await);
+    }
+    let entries = generate_discovery(state, username).await?;
+    if !entries.is_empty() {
+        let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+        let _ = crate::recs::discovery_ids_set(&state.db, username, &ids).await;
+    }
+    Ok(entries)
+}
+
+/// Re-hydrate cached discovery ids into song entries. Tracks that have since
+/// vanished are skipped rather than failing the whole playlist.
+async fn load_entries(state: &AppState, ids: &[String]) -> Vec<SongEntry> {
+    let mut entries = Vec::with_capacity(ids.len());
+    for id in ids {
+        if let Ok(Some(track)) = crate::vtrack::get(&state.db, id).await {
+            entries.push(SongEntry::from_virtual(&track, &state.config.streaming));
+        }
+    }
+    entries
+}
+
+async fn generate_discovery(state: &AppState, username: &str) -> anyhow::Result<Vec<SongEntry>> {
     let target = state.config.recommendations.max_results.max(1) as usize;
     let seeds = crate::recs::recent_listen_seeds(&state.db, username, 5).await?;
     let mut entries = Vec::new();
