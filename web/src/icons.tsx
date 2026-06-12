@@ -98,15 +98,27 @@ export function PlaylistIcon({ className = "" }: IconProps) {
 }
 
 export function GothicCrossIcon({ className = "" }: IconProps) {
-  // Cross pattée: four flared arms, edges curving in toward the center.
-  const arm = "M12 12 L8.2 3.4 Q12 5.2 15.8 3.4 Z";
+  // Elongated Latin cross with barbed spear tips — wrought-iron gothic, not
+  // the flared pattée (which reads Maltese/Armenian).
+  const tip =
+    "M0 -8 L1.7 -3.4 L4.8 -5.6 L2.1 -0.9 L1.5 1.2 L-1.5 1.2 L-2.1 -0.9 L-4.8 -5.6 L-1.7 -3.4 Z";
   return (
-    <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
-      <path d={arm} />
-      <path d={arm} transform="rotate(90 12 12)" />
-      <path d={arm} transform="rotate(180 12 12)" />
-      <path d={arm} transform="rotate(270 12 12)" />
-      <rect x="10.4" y="10.4" width="3.2" height="3.2" transform="rotate(45 12 12)" />
+    <svg viewBox="0 0 32 44" fill="currentColor" className={className}>
+      <g transform="translate(16 10)">
+        <path d={tip} />
+      </g>
+      <g transform="translate(16 34) rotate(180)">
+        <path d={tip} />
+      </g>
+      <g transform="translate(9 16) rotate(-90)">
+        <path d={tip} />
+      </g>
+      <g transform="translate(23 16) rotate(90)">
+        <path d={tip} />
+      </g>
+      <rect x="14.5" y="9" width="3" height="26" />
+      <rect x="8" y="14.5" width="16" height="3" />
+      <rect x="13" y="13" width="6" height="6" transform="rotate(45 16 16)" />
     </svg>
   );
 }
