@@ -3,7 +3,7 @@
 // injects virtual (sgr_/sga_) results into search/artist/album/playlist, so
 // the same plain Subsonic calls surface external content for free.
 
-import { authQuery, type WaveSession } from "./auth";
+import { apiUrl, authQuery, type WaveSession } from "./auth";
 import type { Album, Artist, Playlist, Song } from "./types";
 
 type Envelope = {
@@ -25,7 +25,7 @@ async function call(
       query.set(key, String(value));
     }
   }
-  const response = await fetch(`/rest/${endpoint}?${query.toString()}`, {
+  const response = await fetch(apiUrl(session, `/rest/${endpoint}?${query.toString()}`), {
     headers: { Accept: "application/json" },
   });
   if (!response.ok) {
@@ -135,7 +135,10 @@ function toPlaylist(raw: RawPlaylist): Playlist {
 // ---- URLs the <audio> tag and <img> tags hit directly ----
 
 export function streamUrl(session: WaveSession, id: string): string {
-  return `/rest/stream?${authQuery(session)}&id=${encodeURIComponent(id)}`;
+  return apiUrl(
+    session,
+    `/rest/stream?${authQuery(session)}&id=${encodeURIComponent(id)}&format=mp3&maxBitRate=320`,
+  );
 }
 
 export function coverUrl(
@@ -144,9 +147,10 @@ export function coverUrl(
   size = 200,
 ): string | undefined {
   if (!coverArt) return undefined;
-  return `/rest/getCoverArt?${authQuery(session)}&id=${encodeURIComponent(
-    coverArt,
-  )}&size=${size}`;
+  return apiUrl(
+    session,
+    `/rest/getCoverArt?${authQuery(session)}&id=${encodeURIComponent(coverArt)}&size=${size}`,
+  );
 }
 
 // ---- Endpoints ----
@@ -289,7 +293,7 @@ export async function getWaveNext(
   const query = new URLSearchParams(authQuery(session));
   if (params.count) query.set("count", String(params.count));
   if (params.seedId) query.set("seedId", params.seedId);
-  const response = await fetch(`/wave/api/next?${query.toString()}`, {
+  const response = await fetch(apiUrl(session, `/wave/api/next?${query.toString()}`), {
     headers: { Accept: "application/json" },
   });
   if (!response.ok) {
@@ -304,7 +308,7 @@ export async function waveFeedback(
   trackId: string,
   action: "play" | "skip" | "like" | "dislike",
 ): Promise<void> {
-  const response = await fetch(`/wave/api/feedback?${authQuery(session)}`, {
+  const response = await fetch(apiUrl(session, `/wave/api/feedback?${authQuery(session)}`), {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ trackId, action }),

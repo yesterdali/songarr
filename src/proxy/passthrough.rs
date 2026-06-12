@@ -1,9 +1,9 @@
 //! Transparent reverse proxy to Navidrome (M1).
 //!
 //! Everything not handled by an explicit route lands here: method, raw
-//! path+query, headers and bodies are forwarded verbatim in both directions,
-//! streaming. The body is never inspected or re-encoded, so compressed
-//! responses, range requests and SSE (`/api/events`) pass through unchanged.
+//! path+query, bodies, and ordinary end-to-end headers are forwarded streaming.
+//! The body is never inspected or re-encoded, so compressed responses, range
+//! requests and SSE (`/api/events`) pass through unchanged.
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -37,6 +37,7 @@ pub async fn forward(state: &AppState, req: Request) -> anyhow::Result<Response>
     let status = upstream.status();
     let mut headers = upstream.headers().clone();
     strip_hop_by_hop(&mut headers);
+    strip_upstream_browser_policy(&mut headers);
 
     let mut response = Response::builder()
         .status(status)
@@ -56,6 +57,7 @@ pub async fn fetch_upstream_identity(
     let status = upstream.status();
     let mut headers = upstream.headers().clone();
     strip_hop_by_hop(&mut headers);
+    strip_upstream_browser_policy(&mut headers);
     let body = upstream.bytes().await?;
     Ok((status, headers, body))
 }
@@ -144,6 +146,13 @@ fn strip_hop_by_hop(headers: &mut HeaderMap) {
     headers.remove(HeaderName::from_static("keep-alive"));
 }
 
+/// Browser policy headers describe the upstream site's page, not Songarr's
+/// PWA. Forwarding `Permissions-Policy: autoplay=()` from Navidrome/reverse
+/// proxies can prevent Wave's own audio controls from starting playback.
+fn strip_upstream_browser_policy(headers: &mut HeaderMap) {
+    headers.remove(HeaderName::from_static("permissions-policy"));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,6 +187,10 @@ mod tests {
         headers.insert("keep-alive", HeaderValue::from_static("timeout=5"));
         headers.insert("accept-encoding", HeaderValue::from_static("gzip"));
         headers.insert("range", HeaderValue::from_static("bytes=0-100"));
+        headers.insert(
+            "permissions-policy",
+            HeaderValue::from_static("autoplay=()"),
+        );
 
         strip_hop_by_hop(&mut headers);
 
@@ -188,5 +201,18 @@ mod tests {
         // End-to-end headers survive.
         assert_eq!(headers.get("accept-encoding").unwrap(), "gzip");
         assert_eq!(headers.get("range").unwrap(), "bytes=0-100");
+    }
+
+    #[test]
+    fn upstream_browser_policy_headers_are_stripped() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "permissions-policy",
+            HeaderValue::from_static("autoplay=()"),
+        );
+
+        strip_upstream_browser_policy(&mut headers);
+
+        assert!(headers.get("permissions-policy").is_none());
     }
 }

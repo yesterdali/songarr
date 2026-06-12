@@ -4,9 +4,11 @@ export type WaveSession = {
   username: string;
   token: string;
   salt: string;
+  serverUrl: string;
 };
 
 const SESSION_KEY = "songarr.wave.session.v1";
+const LAST_SERVER_KEY = "songarr.wave.lastServerUrl.v1";
 
 export function generateSalt(): string {
   const bytes = new Uint8Array(16);
@@ -16,12 +18,39 @@ export function generateSalt(): string {
   );
 }
 
-export function createSession(username: string, password: string): WaveSession {
+export function normalizeServerUrl(value = ""): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const withProtocol = /^[a-z][a-z\d+\-.]*:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  return withProtocol.replace(/\/+$/, "");
+}
+
+export function defaultServerUrl(): string {
+  return window.location.origin;
+}
+
+export function loadLastServerUrl(): string {
+  return localStorage.getItem(LAST_SERVER_KEY) ?? defaultServerUrl();
+}
+
+export function apiUrl(session: WaveSession, path: string): string {
+  const base = session.serverUrl || defaultServerUrl();
+  return new URL(path, `${base}/`).toString();
+}
+
+export function createSession(
+  username: string,
+  password: string,
+  serverUrl = "",
+): WaveSession {
   const salt = generateSalt();
   return {
     username: username.trim(),
     token: md5(`${password}${salt}`),
     salt,
+    serverUrl: normalizeServerUrl(serverUrl),
   };
 }
 
@@ -57,6 +86,7 @@ export function loadSession(): WaveSession | null {
       username: parsed.username,
       token: parsed.token,
       salt: parsed.salt,
+      serverUrl: normalizeServerUrl(parsed.serverUrl ?? ""),
     };
   } catch {
     return null;
@@ -65,6 +95,7 @@ export function loadSession(): WaveSession | null {
 
 export function saveSession(session: WaveSession): void {
   localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  localStorage.setItem(LAST_SERVER_KEY, session.serverUrl || defaultServerUrl());
 }
 
 export function clearSession(): void {
@@ -72,7 +103,7 @@ export function clearSession(): void {
 }
 
 export async function validateSession(session: WaveSession): Promise<void> {
-  const response = await fetch(`/rest/ping?${authQuery(session)}`, {
+  const response = await fetch(apiUrl(session, `/rest/ping?${authQuery(session)}`), {
     headers: { Accept: "application/json" },
   });
   if (!response.ok) {

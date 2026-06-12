@@ -16,10 +16,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{Method, StatusCode};
 use axum::routing::get;
 use axum::Router;
 use sqlx::SqlitePool;
+use tower_http::cors::{Any, CorsLayer};
 
 use crate::config::Config;
 use crate::subsonic::Envelope;
@@ -188,9 +189,15 @@ pub fn build_app(state: AppState) -> Router {
     let router = intercept!(router, "star", proxy::scrobble::star_handler);
     let router = intercept!(router, "unstar", proxy::scrobble::unstar_handler);
     let router = intercept!(router, "getLyricsBySongId", proxy::lyrics::handler);
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
+
     router
         .fallback(proxy::passthrough::handler)
         .with_state(state)
+        .layer(cors)
 }
 
 async fn healthz(State(state): State<AppState>) -> (StatusCode, &'static str) {

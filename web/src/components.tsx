@@ -112,7 +112,10 @@ export function SongRow({
 export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
   const { current, isPlaying, currentTime, duration, toggle, next } = usePlayer();
   if (!current) return null;
-  const progress = duration ? Math.min((currentTime / duration) * 100, 100) : 0;
+  const displayDuration = duration || current.duration || 0;
+  const progress = displayDuration
+    ? Math.min((currentTime / displayDuration) * 100, 100)
+    : 0;
   return (
     <div className="relative border-b border-black/5 dark:border-white/5">
       <div className="absolute inset-x-4 top-0 h-0.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
@@ -235,7 +238,11 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
   } = usePlayer();
   const [queueOpen, setQueueOpen] = useState(false);
   if (!current) return null;
-  const progress = duration ? Math.min((currentTime / duration) * 100, 100) : 0;
+  const displayDuration = duration || current.duration || 0;
+  const displayTime = displayDuration ? Math.min(currentTime, displayDuration) : currentTime;
+  const progress = displayDuration
+    ? Math.min((displayTime / displayDuration) * 100, 100)
+    : 0;
   const openArtist = () => {
     onClose();
     if (current.artistId) {
@@ -339,15 +346,15 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           <input
             type="range"
             min={0}
-            max={duration || 0}
-            value={Math.min(currentTime, duration || 0)}
+            max={displayDuration}
+            value={displayDuration ? displayTime : 0}
             onChange={(event) => seek(Number(event.target.value))}
             className="slider w-full"
             style={{ "--p": `${progress}%` } as CSSProperties}
           />
           <div className="flex justify-between text-xs font-medium text-white/50">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
+            <span>{formatTime(displayTime)}</span>
+            <span>{formatTime(displayDuration)}</span>
           </div>
         </div>
 

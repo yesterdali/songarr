@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import {
   clearSession,
   createSession,
+  loadLastServerUrl,
   loadSession,
   saveSession,
   validateSession,
@@ -25,6 +26,7 @@ import {
 } from "./views";
 
 function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
+  const [serverUrl, setServerUrl] = useState(() => loadLastServerUrl());
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -35,7 +37,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
     setError("");
     setBusy(true);
     try {
-      const session = createSession(username, password);
+      const session = createSession(username, password, serverUrl);
       await validateSession(session);
       saveSession(session);
       setPassword("");
@@ -63,6 +65,18 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
           className="space-y-4 rounded-3xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]"
           onSubmit={submit}
         >
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-semibold">Songarr URL</span>
+            <input
+              className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
+              autoComplete="url"
+              inputMode="url"
+              placeholder="https://songarr.example.com"
+              value={serverUrl}
+              onChange={(event) => setServerUrl(event.target.value)}
+              required
+            />
+          </label>
           <label className="block">
             <span className="mb-1.5 block text-sm font-semibold">Username</span>
             <input

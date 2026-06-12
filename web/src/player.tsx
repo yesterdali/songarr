@@ -53,6 +53,11 @@ export function usePlayer(): PlayerValue {
   return value;
 }
 
+function audioDuration(audio: HTMLAudioElement, fallback?: number): number {
+  if (Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration;
+  return fallback && Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
+}
+
 export function PlayerProvider({
   session,
   children,
@@ -120,30 +125,43 @@ export function PlayerProvider({
   }, [completeAndNext]);
 
   /** Make `audio` the active element: move listeners and state over to it. */
-  const attach = useCallback((audio: HTMLAudioElement) => {
+  const attach = useCallback((audio: HTMLAudioElement, fallbackDuration?: number) => {
     detachRef.current?.();
-    const onTime = () => setCurrentTime(audio.currentTime);
-    const onDuration = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
-    const onPlay = () => setIsPlaying(true);
-    const onPause = () => setIsPlaying(false);
+    const syncTiming = () => {
+      setCurrentTime(audio.currentTime);
+      setDuration(audioDuration(audio, fallbackDuration));
+    };
+    const syncPlayback = () => {
+      setIsPlaying(!audio.paused && !audio.ended);
+    };
     const onEnded = () => advanceRef.current();
-    audio.addEventListener("timeupdate", onTime);
-    audio.addEventListener("durationchange", onDuration);
-    audio.addEventListener("loadedmetadata", onDuration);
-    audio.addEventListener("play", onPlay);
-    audio.addEventListener("pause", onPause);
+    audio.addEventListener("timeupdate", syncTiming);
+    audio.addEventListener("durationchange", syncTiming);
+    audio.addEventListener("loadedmetadata", syncTiming);
+    audio.addEventListener("loadeddata", syncTiming);
+    audio.addEventListener("canplay", syncTiming);
+    audio.addEventListener("emptied", syncTiming);
+    audio.addEventListener("error", syncTiming);
+    audio.addEventListener("play", syncPlayback);
+    audio.addEventListener("playing", syncPlayback);
+    audio.addEventListener("pause", syncPlayback);
     audio.addEventListener("ended", onEnded);
     audioRef.current = audio;
     detachRef.current = () => {
-      audio.removeEventListener("timeupdate", onTime);
-      audio.removeEventListener("durationchange", onDuration);
-      audio.removeEventListener("loadedmetadata", onDuration);
-      audio.removeEventListener("play", onPlay);
-      audio.removeEventListener("pause", onPause);
+      audio.removeEventListener("timeupdate", syncTiming);
+      audio.removeEventListener("durationchange", syncTiming);
+      audio.removeEventListener("loadedmetadata", syncTiming);
+      audio.removeEventListener("loadeddata", syncTiming);
+      audio.removeEventListener("canplay", syncTiming);
+      audio.removeEventListener("emptied", syncTiming);
+      audio.removeEventListener("error", syncTiming);
+      audio.removeEventListener("play", syncPlayback);
+      audio.removeEventListener("playing", syncPlayback);
+      audio.removeEventListener("pause", syncPlayback);
       audio.removeEventListener("ended", onEnded);
     };
-    setCurrentTime(audio.currentTime);
-    setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+    syncTiming();
+    syncPlayback();
   }, []);
 
   useEffect(() => {
@@ -169,7 +187,7 @@ export function PlayerProvider({
     if (preloaded && preloaded.id === current.id) {
       preloadRef.current = null;
       const old = audioRef.current;
-      attach(preloaded.audio);
+      attach(preloaded.audio, current.duration);
       if (old) {
         old.pause();
         old.removeAttribute("src");
@@ -181,7 +199,10 @@ export function PlayerProvider({
     }
     const audio = audioRef.current;
     if (!audio) return;
+    setCurrentTime(0);
+    setDuration(current.duration ?? 0);
     audio.src = current.streamUrl ?? streamUrl(session, current.id);
+    audio.load();
     audio.play().catch(() => {
       /* autoplay/gesture rejection — the UI play button recovers */
     });
