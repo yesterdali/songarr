@@ -8,6 +8,7 @@ import {
   PauseIcon,
   PlayIcon,
   PrevIcon,
+  QueueIcon,
 } from "./icons";
 import { useNav } from "./nav";
 import { formatTime, usePlayer } from "./player";
@@ -164,12 +165,63 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+function QueueScreen({ onClose }: { onClose: () => void }) {
+  const { queue, index, playQueue } = usePlayer();
+  const upNext = queue.slice(index + 1);
+  return (
+    <div className="absolute inset-0 z-10 animate-fade-in bg-black/55 backdrop-blur-2xl">
+      <div className="mx-auto flex h-full w-full max-w-md animate-slide-up flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)]">
+        <header className="mb-5 flex items-center">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="back"
+            className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition-transform active:scale-90"
+          >
+            <ChevronLeftIcon className="h-6 w-6" />
+          </button>
+          <span className="flex-1 text-center text-xs font-bold uppercase tracking-[0.2em] text-white/60">
+            Далее
+          </span>
+          <span className="h-10 w-10" />
+        </header>
+        {upNext.length === 0 ? (
+          <p className="py-10 text-center text-sm text-white/50">Очередь пуста.</p>
+        ) : (
+          <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto pb-4">
+            {upNext.map((song, offset) => (
+              <button
+                key={`${song.id}-${offset}`}
+                type="button"
+                onClick={() => playQueue(queue, index + 1 + offset)}
+                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors active:bg-white/10"
+              >
+                <span className="grid h-5 w-7 shrink-0 place-items-center text-xs font-bold text-white/40">
+                  {offset + 1}
+                </span>
+                <Cover
+                  coverArt={song.coverArt}
+                  size={80}
+                  rounded="rounded-lg"
+                  className="h-11 w-11 shrink-0"
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold">{song.title}</span>
+                  <span className="block truncate text-xs text-white/50">{song.artist}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
   const nav = useNav();
   const {
     current,
-    queue,
-    index,
     isPlaying,
     currentTime,
     duration,
@@ -180,10 +232,9 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
     isStarred,
     toggleStar,
     dislikeCurrent,
-    playQueue,
   } = usePlayer();
+  const [queueOpen, setQueueOpen] = useState(false);
   if (!current) return null;
-  const upNext = queue.slice(index + 1);
   const progress = duration ? Math.min((currentTime / duration) * 100, 100) : 0;
   const openArtist = () => {
     onClose();
@@ -224,7 +275,14 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           <span className="flex-1 text-center text-xs font-bold uppercase tracking-[0.2em] text-white/60">
             Сейчас играет
           </span>
-          <span className="h-10 w-10" />
+          <button
+            type="button"
+            onClick={() => setQueueOpen(true)}
+            aria-label="queue"
+            className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition-transform active:scale-90"
+          >
+            <QueueIcon className="h-5 w-5" />
+          </button>
         </header>
 
         <Cover
@@ -324,33 +382,11 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {upNext.length > 0 && (
-          <div className="mt-7 min-h-0 flex-1 overflow-y-auto">
-            <h3 className="mb-2 text-xs font-bold uppercase tracking-[0.15em] text-white/50">
-              Далее
-            </h3>
-            {upNext.map((song, offset) => (
-              <button
-                key={`${song.id}-${offset}`}
-                type="button"
-                onClick={() => playQueue(queue, index + 1 + offset)}
-                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors active:bg-white/10"
-              >
-                <Cover
-                  coverArt={song.coverArt}
-                  size={80}
-                  rounded="rounded-lg"
-                  className="h-9 w-9 shrink-0"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{song.title}</span>
-                  <span className="block truncate text-xs text-white/50">{song.artist}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
+        {/* Free space below the controls — reserved for lyrics & friends. */}
+        <div className="flex-1" />
       </div>
+
+      {queueOpen && <QueueScreen onClose={() => setQueueOpen(false)} />}
     </div>
   );
 }

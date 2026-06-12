@@ -144,10 +144,18 @@ export function HomeView() {
   const nav = useNav();
   const [waveBusy, setWaveBusy] = useState(false);
   const [waveError, setWaveError] = useState<string | null>(null);
+  const liked = useAsync(() => api.getStarred(session), [session]);
   const recent = useAsync(
     async () => api.repairAlbumCovers(session, await api.getAlbumList(session, "newest")),
     [session],
   );
+
+  // YT-Music-style quick picks: liked tracks in swipeable pages of 4 rows.
+  const likedSongs = liked.data?.songs ?? [];
+  const likedPages: Song[][] = [];
+  for (let i = 0; i < Math.min(likedSongs.length, 24); i += 4) {
+    likedPages.push(likedSongs.slice(i, i + 4));
+  }
 
   async function playWave() {
     setWaveBusy(true);
@@ -188,6 +196,36 @@ export function HomeView() {
         </p>
       )}
 
+      {(liked.loading || likedSongs.length > 0) && (
+        <section className="mb-7">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-lg font-bold tracking-tight">Любимые треки</h2>
+            <button
+              type="button"
+              onClick={() => nav.push({ name: "liked" })}
+              className="text-sm font-semibold text-wave-pink transition active:opacity-70"
+            >
+              Всё
+            </button>
+          </div>
+          <Status loading={liked.loading} error={liked.error} />
+          <div className="scrollbar-none -mx-5 flex snap-x snap-mandatory gap-6 overflow-x-auto scroll-pl-5 px-5">
+            {likedPages.map((page, pageIndex) => (
+              <div key={pageIndex} className="w-[85%] shrink-0 snap-start">
+                {page.map((song, i) => (
+                  <SongRow
+                    key={song.id}
+                    song={song}
+                    songs={likedSongs}
+                    position={pageIndex * 4 + i}
+                  />
+                ))}
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       <section>
         <div className="mb-3 flex items-baseline justify-between">
           <h2 className="text-lg font-bold tracking-tight">Недавнее</h2>
@@ -200,7 +238,7 @@ export function HomeView() {
           </button>
         </div>
         <Status loading={recent.loading} error={recent.error} />
-        <div className="scrollbar-none -mx-5 flex snap-x snap-mandatory gap-3 overflow-x-auto px-5 pb-2">
+        <div className="scrollbar-none -mx-5 flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-pl-5 px-5 pb-2">
           {recent.data?.map((album) => (
             <AlbumCard key={album.id} album={album} />
           ))}

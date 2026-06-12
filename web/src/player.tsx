@@ -60,7 +60,13 @@ export function PlayerProvider({
   session: WaveSession;
   children: ReactNode;
 }) {
+  // Active playback element plus a hidden one warming the next track. The
+  // preload request also makes the server resolve/stage virtual tracks ahead
+  // of time, so advancing swaps elements instead of waiting on the pipeline.
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const preloadRef = useRef<{ id: string; audio: HTMLAudioElement } | null>(null);
+  const detachRef = useRef<(() => void) | null>(null);
+  const wavePrefetchRef = useRef<Promise<Song[]> | null>(null);
 
   const [queue, setQueue] = useState<Song[]>([]);
   const [index, setIndex] = useState(0);
@@ -106,22 +112,29 @@ export function PlayerProvider({
     setIndex((i) => (i > 0 ? i - 1 : i));
   }, []);
 
-  // Wire audio element events once.
+  // `ended` must always advance from the latest queue state, while the
+  // attached listeners stay stable across element swaps — bridge via a ref.
+  const advanceRef = useRef<() => void>(() => undefined);
   useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio) return;
+    advanceRef.current = completeAndNext;
+  }, [completeAndNext]);
+
+  /** Make `audio` the active element: move listeners and state over to it. */
+  const attach = useCallback((audio: HTMLAudioElement) => {
+    detachRef.current?.();
     const onTime = () => setCurrentTime(audio.currentTime);
     const onDuration = () => setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
     const onPlay = () => setIsPlaying(true);
     const onPause = () => setIsPlaying(false);
-    const onEnded = () => completeAndNext();
+    const onEnded = () => advanceRef.current();
     audio.addEventListener("timeupdate", onTime);
     audio.addEventListener("durationchange", onDuration);
     audio.addEventListener("loadedmetadata", onDuration);
     audio.addEventListener("play", onPlay);
     audio.addEventListener("pause", onPause);
     audio.addEventListener("ended", onEnded);
-    return () => {
+    audioRef.current = audio;
+    detachRef.current = () => {
       audio.removeEventListener("timeupdate", onTime);
       audio.removeEventListener("durationchange", onDuration);
       audio.removeEventListener("loadedmetadata", onDuration);
@@ -129,17 +142,82 @@ export function PlayerProvider({
       audio.removeEventListener("pause", onPause);
       audio.removeEventListener("ended", onEnded);
     };
-  }, [completeAndNext]);
+    setCurrentTime(audio.currentTime);
+    setDuration(Number.isFinite(audio.duration) ? audio.duration : 0);
+  }, []);
 
-  // Load + play whenever the current track changes.
   useEffect(() => {
+    const audio = new Audio();
+    audio.preload = "auto";
+    attach(audio);
+    return () => {
+      detachRef.current?.();
+      audio.pause();
+      audio.removeAttribute("src");
+      if (preloadRef.current) {
+        preloadRef.current.audio.removeAttribute("src");
+        preloadRef.current = null;
+      }
+    };
+  }, [attach]);
+
+  // Load + play whenever the current track changes; if the track was already
+  // preloaded, swap elements and start instantly.
+  useEffect(() => {
+    if (!current) return;
+    const preloaded = preloadRef.current;
+    if (preloaded && preloaded.id === current.id) {
+      preloadRef.current = null;
+      const old = audioRef.current;
+      attach(preloaded.audio);
+      if (old) {
+        old.pause();
+        old.removeAttribute("src");
+      }
+      preloaded.audio.play().catch(() => {
+        /* autoplay/gesture rejection — the UI play button recovers */
+      });
+      return;
+    }
     const audio = audioRef.current;
-    if (!audio || !current) return;
+    if (!audio) return;
     audio.src = current.streamUrl ?? streamUrl(session, current.id);
     audio.play().catch(() => {
       /* autoplay/gesture rejection — the UI play button recovers */
     });
-  }, [current, session]);
+  }, [current, session, attach]);
+
+  // Warm the next track in the queue so advancing is instant.
+  useEffect(() => {
+    const nextSong = queue[index + 1];
+    if (!nextSong || preloadRef.current?.id === nextSong.id) return;
+    if (preloadRef.current) {
+      preloadRef.current.audio.removeAttribute("src");
+      preloadRef.current.audio.load();
+    }
+    const audio = new Audio();
+    audio.preload = "auto";
+    audio.src = nextSong.streamUrl ?? streamUrl(session, nextSong.id);
+    audio.load();
+    preloadRef.current = { id: nextSong.id, audio };
+  }, [queue, index, session]);
+
+  // Fetch the first Wave batch at startup and warm its opening track, so the
+  // big Wave button starts music with no wait.
+  useEffect(() => {
+    const prefetch = getWaveNext(session, { count: 12 }).catch(() => [] as Song[]);
+    wavePrefetchRef.current = prefetch;
+    prefetch.then((songs) => {
+      const first = songs[0];
+      // Don't clobber a queue preload, and skip once something is playing.
+      if (!first || preloadRef.current || audioRef.current?.src) return;
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.src = first.streamUrl ?? streamUrl(session, first.id);
+      audio.load();
+      preloadRef.current = { id: first.id, audio };
+    });
+  }, [session]);
 
   // Endless Wave: ask the server for more when the queue is almost drained.
   useEffect(() => {
@@ -197,7 +275,14 @@ export function PlayerProvider({
   }, []);
 
   const startWave = useCallback(async () => {
-    const songs = await getWaveNext(session, { count: 12 });
+    // Use the batch prefetched at startup when available; fetch fresh after
+    // it's consumed so repeated taps still get current recommendations.
+    const prefetched = wavePrefetchRef.current;
+    wavePrefetchRef.current = null;
+    let songs = prefetched ? await prefetched : [];
+    if (songs.length === 0) {
+      songs = await getWaveNext(session, { count: 12 });
+    }
     if (songs.length === 0) {
       throw new Error("Wave returned no tracks yet");
     }
@@ -296,12 +381,7 @@ export function PlayerProvider({
     ],
   );
 
-  return (
-    <PlayerContext.Provider value={value}>
-      <audio ref={audioRef} preload="none" className="hidden" />
-      {children}
-    </PlayerContext.Provider>
-  );
+  return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
 }
 
 export function formatTime(seconds: number): string {

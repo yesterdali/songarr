@@ -97,6 +97,19 @@ export function PlaylistIcon({ className = "" }: IconProps) {
   );
 }
 
+export function QueueIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={className}>
+      <path strokeLinecap="round" strokeWidth="2" d="M4 6h16M4 11h16M4 16h8" />
+      <path
+        fill="currentColor"
+        stroke="none"
+        d="M15.5 14.2a.6.6 0 0 1 .9-.52l4.2 2.42a.6.6 0 0 1 0 1.04l-4.2 2.42a.6.6 0 0 1-.9-.52z"
+      />
+    </svg>
+  );
+}
+
 export function MusicNoteIcon({ className = "" }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
