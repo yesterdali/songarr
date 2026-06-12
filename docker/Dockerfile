@@ -1,5 +1,14 @@
 # Build context is the repository root:
 #   docker build -f docker/Dockerfile -t songarr-proxy .
+FROM node:22-bookworm-slim AS web-build
+WORKDIR /build/web
+
+COPY web/package*.json ./
+RUN npm ci
+
+COPY web ./
+RUN npm run build
+
 FROM rust:1-slim-bookworm AS build
 WORKDIR /build
 
@@ -11,6 +20,7 @@ RUN mkdir src && echo 'fn main() {}' > src/main.rs \
 
 COPY src ./src
 COPY migrations ./migrations
+COPY --from=web-build /build/web/dist ./web/dist
 RUN touch src/main.rs && cargo build --release
 
 FROM debian:bookworm-slim
