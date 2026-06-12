@@ -65,13 +65,15 @@ export function PlayerProvider({
   session: WaveSession;
   children: ReactNode;
 }) {
-  // Active playback element plus a hidden one warming the next track. The
-  // preload request also makes the server resolve/stage virtual tracks ahead
-  // of time, so advancing swaps elements instead of waiting on the pipeline.
+  // Active playback element plus hidden ones warming upcoming tracks. The
+  // preload requests also make the server resolve/stage virtual tracks ahead
+  // of time, so starting/advancing swaps elements instead of waiting on the
+  // pipeline. Capped at 2 — the server allows 3 concurrent virtual streams,
+  // and the active track needs a slot.
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const preloadRef = useRef<{ id: string; audio: HTMLAudioElement } | null>(null);
+  const preloadsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const detachRef = useRef<(() => void) | null>(null);
-  const wavePrefetchRef = useRef<Promise<Song[]> | null>(null);
+  const wavePrefetchRef = useRef<{ promise: Promise<Song[]>; at: number } | null>(null);
 
   const [queue, setQueue] = useState<Song[]>([]);
   const [index, setIndex] = useState(0);
@@ -86,6 +88,43 @@ export function PlayerProvider({
 
   const cover = useCallback(
     (coverArt: string | undefined, size = 200) => coverUrl(session, coverArt, size),
+    [session],
+  );
+
+  /** Warm the browser cache with a song's covers: the full-screen size and
+   *  the list/backdrop size. */
+  const warmCovers = useCallback(
+    (song: Song | undefined) => {
+      if (!song?.coverArt) return;
+      for (const size of [600, 80]) {
+        const url = cover(song.coverArt, size);
+        if (url) new Image().src = url;
+      }
+    },
+    [cover],
+  );
+
+  /** Start buffering a song's audio in a hidden element (keeps at most
+   *  `keepIds` + the new one alive; evicted elements stop downloading). */
+  const warmAudio = useCallback(
+    (song: Song | undefined, keepIds: string[] = []) => {
+      if (!song) return;
+      const preloads = preloadsRef.current;
+      if (preloads.has(song.id)) return;
+      for (const [id, audio] of preloads) {
+        if (preloads.size < 2) break;
+        if (id === song.id || keepIds.includes(id)) continue;
+        audio.removeAttribute("src");
+        audio.load();
+        preloads.delete(id);
+      }
+      if (preloads.size >= 2) return;
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.src = song.streamUrl ?? streamUrl(session, song.id);
+      audio.load();
+      preloads.set(song.id, audio);
+    },
     [session],
   );
 
@@ -172,10 +211,10 @@ export function PlayerProvider({
       detachRef.current?.();
       audio.pause();
       audio.removeAttribute("src");
-      if (preloadRef.current) {
-        preloadRef.current.audio.removeAttribute("src");
-        preloadRef.current = null;
+      for (const preloaded of preloadsRef.current.values()) {
+        preloaded.removeAttribute("src");
       }
+      preloadsRef.current.clear();
     };
   }, [attach]);
 
@@ -183,16 +222,16 @@ export function PlayerProvider({
   // preloaded, swap elements and start instantly.
   useEffect(() => {
     if (!current) return;
-    const preloaded = preloadRef.current;
-    if (preloaded && preloaded.id === current.id) {
-      preloadRef.current = null;
+    const preloaded = preloadsRef.current.get(current.id);
+    if (preloaded) {
+      preloadsRef.current.delete(current.id);
       const old = audioRef.current;
-      attach(preloaded.audio, current.duration);
+      attach(preloaded, current.duration);
       if (old) {
         old.pause();
         old.removeAttribute("src");
       }
-      preloaded.audio.play().catch(() => {
+      preloaded.play().catch(() => {
         /* autoplay/gesture rejection — the UI play button recovers */
       });
       return;
@@ -208,37 +247,45 @@ export function PlayerProvider({
     });
   }, [current, session, attach]);
 
-  // Warm the next track in the queue so advancing is instant.
+  // Warm the next track (audio) and the large covers of the current and next
+  // tracks, so advancing and opening the full-screen player are both instant.
   useEffect(() => {
     const nextSong = queue[index + 1];
-    if (!nextSong || preloadRef.current?.id === nextSong.id) return;
-    if (preloadRef.current) {
-      preloadRef.current.audio.removeAttribute("src");
-      preloadRef.current.audio.load();
-    }
-    const audio = new Audio();
-    audio.preload = "auto";
-    audio.src = nextSong.streamUrl ?? streamUrl(session, nextSong.id);
-    audio.load();
-    preloadRef.current = { id: nextSong.id, audio };
-  }, [queue, index, session]);
+    warmAudio(nextSong);
+    warmCovers(current ?? undefined);
+    warmCovers(nextSong);
+  }, [queue, index, current, warmAudio, warmCovers]);
 
-  // Fetch the first Wave batch at startup and warm its opening track, so the
-  // big Wave button starts music with no wait.
-  useEffect(() => {
-    const prefetch = getWaveNext(session, { count: 12 }).catch(() => [] as Song[]);
-    wavePrefetchRef.current = prefetch;
-    prefetch.then((songs) => {
-      const first = songs[0];
-      // Don't clobber a queue preload, and skip once something is playing.
-      if (!first || preloadRef.current || audioRef.current?.src) return;
-      const audio = new Audio();
-      audio.preload = "auto";
-      audio.src = first.streamUrl ?? streamUrl(session, first.id);
-      audio.load();
-      preloadRef.current = { id: first.id, audio };
+  // Fetch the first Wave batch and warm its opening tracks + covers, so the
+  // big Wave button starts music with no wait. Refreshed when the app comes
+  // back to the foreground after sitting idle, so a stale batch never plays.
+  const prefetchWave = useCallback(() => {
+    const promise = getWaveNext(session, { count: 12 }).catch(() => [] as Song[]);
+    wavePrefetchRef.current = { promise, at: Date.now() };
+    promise.then((songs) => {
+      // Skip the warm-up once something is playing — the queue effect owns
+      // the preload slots then.
+      if (audioRef.current?.src) return;
+      warmAudio(songs[0]);
+      warmAudio(songs[1], songs[0] ? [songs[0].id] : []);
+      warmCovers(songs[0]);
+      warmCovers(songs[1]);
     });
-  }, [session]);
+  }, [session, warmAudio, warmCovers]);
+
+  useEffect(() => {
+    prefetchWave();
+    const WAVE_PREFETCH_TTL_MS = 10 * 60 * 1000;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (audioRef.current?.src) return; // playing — nothing to refresh
+      const prefetched = wavePrefetchRef.current;
+      if (prefetched && Date.now() - prefetched.at < WAVE_PREFETCH_TTL_MS) return;
+      prefetchWave();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [prefetchWave]);
 
   // Endless Wave: ask the server for more when the queue is almost drained.
   useEffect(() => {
@@ -262,12 +309,13 @@ export function PlayerProvider({
   // Media Session: lock-screen metadata + controls.
   useEffect(() => {
     if (!("mediaSession" in navigator) || !current) return;
-    const art = cover(current.coverArt, 512);
+    // 600 matches the full-screen player, so the lock screen reuses its cache.
+    const art = cover(current.coverArt, 600);
     navigator.mediaSession.metadata = new MediaMetadata({
       title: current.title,
       artist: current.artist,
       album: current.album ?? "",
-      artwork: art ? [{ src: art, sizes: "512x512", type: "image/jpeg" }] : [],
+      artwork: art ? [{ src: art, sizes: "600x600", type: "image/jpeg" }] : [],
     });
     navigator.mediaSession.setActionHandler("play", () => audioRef.current?.play());
     navigator.mediaSession.setActionHandler("pause", () => audioRef.current?.pause());
@@ -300,7 +348,7 @@ export function PlayerProvider({
     // it's consumed so repeated taps still get current recommendations.
     const prefetched = wavePrefetchRef.current;
     wavePrefetchRef.current = null;
-    let songs = prefetched ? await prefetched : [];
+    let songs = prefetched ? await prefetched.promise : [];
     if (songs.length === 0) {
       songs = await getWaveNext(session, { count: 12 });
     }

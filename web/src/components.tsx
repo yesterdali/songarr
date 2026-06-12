@@ -19,17 +19,24 @@ export function Cover({
   size = 200,
   className = "",
   rounded = "rounded-xl",
+  placeholderSize,
 }: {
   coverArt?: string;
   size?: number;
   className?: string;
   rounded?: string;
+  /** Show this (usually browser-cached) smaller size blurred-up while the
+   *  full-size image is still downloading. */
+  placeholderSize?: number;
 }) {
   const { cover } = usePlayer();
   const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const src = cover(coverArt, size);
+  const placeholderSrc = placeholderSize ? cover(coverArt, placeholderSize) : undefined;
   useEffect(() => {
     setFailed(false);
+    setLoaded(false);
   }, [coverArt]);
   if (!src || failed) {
     return (
@@ -40,14 +47,36 @@ export function Cover({
       </div>
     );
   }
+  if (!placeholderSrc) {
+    return (
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className={`object-cover ${rounded} ${className}`}
+      />
+    );
+  }
   return (
-    <img
-      src={src}
-      alt=""
-      loading="lazy"
-      onError={() => setFailed(true)}
-      className={`object-cover ${rounded} ${className}`}
-    />
+    <span className={`relative block overflow-hidden ${rounded} ${className}`}>
+      {!loaded && (
+        <img
+          src={placeholderSrc}
+          alt=""
+          className="absolute inset-0 h-full w-full scale-105 object-cover blur-[6px]"
+        />
+      )}
+      <img
+        src={src}
+        alt=""
+        onLoad={() => setLoaded(true)}
+        onError={() => setFailed(true)}
+        className={`relative h-full w-full object-cover transition-opacity duration-300 ${
+          loaded ? "opacity-100" : "opacity-0"
+        }`}
+      />
+    </span>
   );
 }
 
@@ -260,9 +289,11 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-20 animate-fade-in overflow-hidden bg-neutral-950 text-white">
       {/* Ambient backdrop: the cover, blown up and blurred */}
       <div className="absolute inset-0">
+        {/* size 80 matches the list rows, so this is already in cache; the
+            heavy blur hides the low resolution */}
         <Cover
           coverArt={current.coverArt}
-          size={300}
+          size={80}
           rounded=""
           className="h-full w-full scale-125 opacity-50 blur-3xl saturate-150"
         />
@@ -295,6 +326,7 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
         <Cover
           coverArt={current.coverArt}
           size={600}
+          placeholderSize={80}
           rounded="rounded-3xl"
           className="mx-auto aspect-square w-full max-w-xs shadow-[0_24px_60px_-12px_rgb(0_0_0/0.7)] ring-1 ring-white/10"
         />
