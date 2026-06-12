@@ -177,7 +177,7 @@ export function HomeView() {
         disabled={waveBusy}
         className="wave-hero group relative mb-7 aspect-[16/10] w-full overflow-hidden rounded-xl text-left shadow-xl shadow-wave-pink/25 transition-transform active:scale-[0.98]"
       >
-        <GothicCrossIcon className="absolute -right-8 -top-10 h-52 w-52 rotate-12 text-black/30 transition-transform duration-700 group-active:scale-110" />
+        <GothicCrossIcon className="absolute -right-10 -top-12 h-56 w-56 text-black/25 transition-transform duration-700 group-active:scale-110" />
         <span className="absolute right-5 top-5 grid h-14 w-14 place-items-center rounded-full border border-wave-pink/40 bg-black/60 text-[#e9e2d4] shadow-lg backdrop-blur transition group-active:scale-90">
           <PlayIcon className="ml-0.5 h-7 w-7" />
         </span>

@@ -98,11 +98,15 @@ export function PlaylistIcon({ className = "" }: IconProps) {
 }
 
 export function GothicCrossIcon({ className = "" }: IconProps) {
+  // Cross pattée: four flared arms, edges curving in toward the center.
+  const arm = "M12 12 L8.2 3.4 Q12 5.2 15.8 3.4 Z";
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className}>
-      {/* cross pattée: flared arms meeting in a diamond core */}
-      <path d="M10.6 2h2.8l-1 5.6 5.6-1v2.8L13.4 12l4.6 2.6v2.8l-5.6-1 1 5.6h-2.8l1-5.6-5.6 1v-2.8L10.6 12 6 9.4V6.6l5.6 1z" />
-      <rect x="10.2" y="10.2" width="3.6" height="3.6" transform="rotate(45 12 12)" />
+      <path d={arm} />
+      <path d={arm} transform="rotate(90 12 12)" />
+      <path d={arm} transform="rotate(180 12 12)" />
+      <path d={arm} transform="rotate(270 12 12)" />
+      <rect x="10.4" y="10.4" width="3.2" height="3.2" transform="rotate(45 12 12)" />
     </svg>
   );
 }
