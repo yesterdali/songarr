@@ -327,7 +327,7 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           coverArt={current.coverArt}
           size={600}
           placeholderSize={80}
-          rounded="rounded-3xl"
+          rounded="rounded-xl"
           className="mx-auto aspect-square w-full max-w-xs shadow-[0_24px_60px_-12px_rgb(0_0_0/0.7)] ring-1 ring-white/10"
         />
 

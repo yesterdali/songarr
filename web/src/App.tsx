@@ -53,16 +53,16 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
     <div className="min-h-full">
       <main className="mx-auto flex min-h-full max-w-md animate-fade-in flex-col justify-center px-6 py-10">
         <div className="mb-9 flex flex-col items-center text-center">
-          <div className="mb-4 grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-br from-wave-orange via-wave-pink to-wave-violet shadow-lg shadow-wave-pink/30">
+          <div className="mb-4 grid h-16 w-16 place-items-center rounded-lg bg-gradient-to-br from-wave-orange via-wave-pink to-wave-violet shadow-lg shadow-wave-pink/30">
             <WaveIcon className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-3xl font-extrabold tracking-tight">Твоя волна</h1>
-          <p className="mt-1 text-sm font-medium text-neutral-500 dark:text-neutral-400">
+          <h1 className="text-4xl font-extrabold tracking-tight">Твоя волна</h1>
+          <p className="font-display mt-1 text-base italic tracking-[0.2em] text-wave-pink/80">
             Songarr Wave
           </p>
         </div>
         <form
-          className="space-y-4 rounded-3xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]"
+          className="space-y-4 rounded-xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]"
           onSubmit={submit}
         >
           <label className="block">
@@ -191,7 +191,7 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
 
           {/* Bottom chrome: floating dock with the now-playing bar above the tab bar */}
           <div className="fixed inset-x-0 bottom-0 z-10 px-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
-            <div className="mx-auto max-w-md overflow-hidden rounded-[1.75rem] border border-black/5 bg-white/85 shadow-2xl shadow-black/15 backdrop-blur-2xl dark:border-white/10 dark:bg-neutral-900/85">
+            <div className="mx-auto max-w-md overflow-hidden rounded-xl border border-black/5 bg-white/85 shadow-2xl shadow-black/15 backdrop-blur-2xl dark:border-wave-pink/15 dark:bg-[#0d070b]/90">
               <NowPlayingBar onOpen={() => setNpOpen(true)} />
               <nav className="flex items-stretch justify-around">
                 {TABS.map(({ tab, label, icon: Icon }) => {

@@ -1,9 +1,23 @@
 @import "tailwindcss";
 
+/* Gothic display serif with proper Cyrillic support */
+@import "@fontsource/cormorant/latin-500.css";
+@import "@fontsource/cormorant/latin-500-italic.css";
+@import "@fontsource/cormorant/latin-700.css";
+@import "@fontsource/cormorant/cyrillic-500.css";
+@import "@fontsource/cormorant/cyrillic-700.css";
+
+/* The gothic theme is dark-only: `dark:` follows the .dark class on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
-  --color-wave-orange: #ff8a3d;
-  --color-wave-pink: #ff4d9d;
-  --color-wave-violet: #a23bff;
+  /* Blood & wine replace the old sunset gradient; every component built on
+     these tokens reskins automatically. */
+  --color-wave-orange: #a4243b;
+  --color-wave-pink: #c41e3a;
+  --color-wave-violet: #45122e;
+
+  --font-display: "Cormorant", Georgia, "Times New Roman", serif;
 
   --animate-fade-in: fade-in 0.3s ease both;
   --animate-slide-up: slide-up 0.45s cubic-bezier(0.32, 0.72, 0, 1) both;
@@ -29,7 +43,7 @@
 }
 
 :root {
-  color-scheme: light dark;
+  color-scheme: dark;
 }
 
 html,
@@ -49,18 +63,20 @@ body {
     "Segoe UI",
     Roboto,
     sans-serif;
-  background-color: #f6f6f9;
-  color: #131316;
+  background-color: #070408;
+  color: #e9e2d4;
 }
 
-@media (prefers-color-scheme: dark) {
-  body {
-    background-color: #09090d;
-    color: #f4f4f6;
-  }
+/* Display serif for everything that speaks loudly */
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
-/* Ambient brand glow behind every screen */
+/* Candlelit gloom: ember glow from below, cold violet from above, vignette */
 body::before {
   content: "";
   position: fixed;
@@ -68,9 +84,10 @@ body::before {
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(60% 40% at 12% -5%, rgb(255 138 61 / 0.14), transparent 60%),
-    radial-gradient(55% 40% at 95% 0%, rgb(162 59 255 / 0.13), transparent 60%),
-    radial-gradient(70% 50% at 50% 112%, rgb(255 77 157 / 0.1), transparent 60%);
+    radial-gradient(55% 35% at 50% -5%, rgb(69 18 46 / 0.35), transparent 65%),
+    radial-gradient(40% 30% at 8% 25%, rgb(164 36 59 / 0.08), transparent 60%),
+    radial-gradient(70% 45% at 50% 112%, rgb(122 12 31 / 0.22), transparent 65%),
+    radial-gradient(120% 90% at 50% 50%, transparent 55%, rgb(0 0 0 / 0.55));
 }
 
 /* Hide scrollbars on horizontal carousels */
@@ -81,17 +98,19 @@ body::before {
   display: none;
 }
 
-/* Slowly drifting brand gradient (Wave hero card) */
+/* Smouldering hero card: embers shifting under black glass */
 .wave-hero {
   background: linear-gradient(
-    120deg,
-    #ff8a3d,
-    #ff4d9d 40%,
-    #a23bff 75%,
-    #ff4d9d
+    135deg,
+    #16060c,
+    #7a0c1f 35%,
+    #a4243b 50%,
+    #45122e 72%,
+    #0c0410
   );
   background-size: 250% 250%;
-  animation: wave-pan 14s ease-in-out infinite;
+  animation: wave-pan 16s ease-in-out infinite;
+  border: 1px solid rgb(196 30 58 / 0.25);
 }
 @keyframes wave-pan {
   0%,
@@ -113,41 +132,41 @@ input[type="range"].slider {
   cursor: pointer;
 }
 input[type="range"].slider::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 999px;
+  height: 4px;
+  border-radius: 0;
   background: linear-gradient(
     to right,
-    #ff8a3d,
-    #ff4d9d var(--p, 0%),
-    rgb(255 255 255 / 0.25) var(--p, 0%)
+    #7a0c1f,
+    #c41e3a var(--p, 0%),
+    rgb(233 226 212 / 0.16) var(--p, 0%)
   );
 }
 input[type="range"].slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
-  margin-top: -4.5px;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 1px 6px rgb(0 0 0 / 0.45);
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  transform: rotate(45deg);
+  border-radius: 2px;
+  background: #e9e2d4;
+  box-shadow: 0 0 8px rgb(196 30 58 / 0.7);
 }
 input[type="range"].slider::-moz-range-track {
-  height: 5px;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.25);
+  height: 4px;
+  background: rgb(233 226 212 / 0.16);
 }
 input[type="range"].slider::-moz-range-progress {
-  height: 5px;
-  border-radius: 999px;
-  background: linear-gradient(to right, #ff8a3d, #ff4d9d);
+  height: 4px;
+  background: linear-gradient(to right, #7a0c1f, #c41e3a);
 }
 input[type="range"].slider::-moz-range-thumb {
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
   border: none;
-  border-radius: 999px;
-  background: #fff;
-  box-shadow: 0 1px 6px rgb(0 0 0 / 0.45);
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: #e9e2d4;
+  box-shadow: 0 0 8px rgb(196 30 58 / 0.7);
 }
 
 /* Tiny equalizer shown on the playing track */
@@ -159,7 +178,7 @@ input[type="range"].slider::-moz-range-thumb {
 }
 .eq span {
   width: 3px;
-  border-radius: 2px;
+  border-radius: 0;
   background: currentColor;
   animation: eq-bounce 1s ease-in-out infinite;
 }
@@ -180,4 +199,26 @@ input[type="range"].slider::-moz-range-thumb {
   50% {
     height: 100%;
   }
+}
+
+/* Ornamental rule: ─── ✠ ─── */
+.gothic-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: rgb(196 30 58 / 0.55);
+}
+.gothic-rule::before,
+.gothic-rule::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(
+    to var(--rule-dir, right),
+    rgb(196 30 58 / 0.45),
+    transparent
+  );
+}
+.gothic-rule::before {
+  --rule-dir: left;
 }

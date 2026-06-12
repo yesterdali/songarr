@@ -3,12 +3,12 @@ import * as api from "./api";
 import { Cover, SongRow } from "./components";
 import {
   ChevronLeftIcon,
+  GothicCrossIcon,
   HeartIcon,
   LibraryIcon,
   PlayIcon,
   PlaylistIcon,
   SearchIcon,
-  WaveIcon,
 } from "./icons";
 import { useNav } from "./nav";
 import { usePlayer } from "./player";
@@ -61,8 +61,8 @@ function Status({ loading, error }: { loading: boolean; error: string | null }) 
 
 function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <h2 className="mb-2 text-xs font-bold uppercase tracking-[0.12em] text-neutral-400 dark:text-neutral-500">
-      {children}
+    <h2 className="gothic-rule mb-3 font-sans text-xs font-bold uppercase tracking-[0.2em] text-neutral-400 dark:text-neutral-500">
+      <span>{children}</span>
     </h2>
   );
 }
@@ -128,7 +128,7 @@ function AlbumCard({ album, className = "w-32 shrink-0" }: { album: Album; class
       <Cover
         coverArt={album.coverArt}
         size={200}
-        rounded="rounded-2xl"
+        rounded="rounded-lg"
         className="aspect-square w-full shadow-lg shadow-black/10 ring-1 ring-black/5 dark:ring-white/10"
       />
       <p className="mt-2 truncate text-sm font-semibold">{album.name}</p>
@@ -175,14 +175,14 @@ export function HomeView() {
         type="button"
         onClick={playWave}
         disabled={waveBusy}
-        className="wave-hero group relative mb-7 aspect-[16/10] w-full overflow-hidden rounded-3xl text-left shadow-xl shadow-wave-pink/25 transition-transform active:scale-[0.98]"
+        className="wave-hero group relative mb-7 aspect-[16/10] w-full overflow-hidden rounded-xl text-left shadow-xl shadow-wave-pink/25 transition-transform active:scale-[0.98]"
       >
-        <WaveIcon className="absolute -right-10 -top-12 h-56 w-56 text-white/15 transition-transform duration-700 group-active:scale-110" />
-        <span className="absolute right-5 top-5 grid h-14 w-14 place-items-center rounded-full bg-white/95 text-wave-violet shadow-lg backdrop-blur transition group-active:scale-90">
+        <GothicCrossIcon className="absolute -right-8 -top-10 h-52 w-52 rotate-12 text-black/30 transition-transform duration-700 group-active:scale-110" />
+        <span className="absolute right-5 top-5 grid h-14 w-14 place-items-center rounded-full border border-wave-pink/40 bg-black/60 text-[#e9e2d4] shadow-lg backdrop-blur transition group-active:scale-90">
           <PlayIcon className="ml-0.5 h-7 w-7" />
         </span>
         <span className="absolute inset-x-5 bottom-5 block">
-          <span className="block text-3xl font-extrabold tracking-tight text-white drop-shadow-md">
+          <span className="font-display block text-4xl font-bold tracking-tight text-[#f3ecdd] drop-shadow-md">
             Твоя волна
           </span>
           <span className="mt-1 block max-w-[80%] text-sm font-medium text-white/85">
@@ -276,7 +276,7 @@ export function SearchView() {
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Песни, артисты, альбомы"
-          className="w-full rounded-2xl border border-black/5 bg-white/80 py-3 pl-11 pr-4 text-base shadow-sm outline-none backdrop-blur transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
+          className="w-full rounded-lg border border-black/5 bg-white/80 py-3 pl-11 pr-4 text-base shadow-sm outline-none backdrop-blur transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
         />
       </div>
 
@@ -350,7 +350,7 @@ export function LibraryView() {
             key={label}
             type="button"
             onClick={actions[i]}
-            className={`flex items-center gap-3 rounded-2xl border border-black/5 bg-gradient-to-br to-transparent px-4 py-4 text-left font-semibold backdrop-blur transition active:scale-[0.97] dark:border-white/10 ${accent}`}
+            className={`flex items-center gap-3 rounded-lg border border-black/5 bg-gradient-to-br to-transparent px-4 py-4 text-left font-semibold backdrop-blur transition active:scale-[0.97] dark:border-white/10 ${accent}`}
           >
             <Icon className="h-5 w-5" />
             <span className="text-neutral-900 dark:text-neutral-100">{label}</span>
@@ -384,7 +384,7 @@ export function AlbumsView() {
   return (
     <div className="animate-fade-in">
       <ScreenHeader title="Альбомы" />
-      <div className="mb-5 grid grid-cols-3 gap-1 rounded-2xl border border-black/5 bg-black/[0.04] p-1 backdrop-blur dark:border-white/5 dark:bg-white/5">
+      <div className="mb-5 grid grid-cols-3 gap-1 rounded-lg border border-black/5 bg-black/[0.04] p-1 backdrop-blur dark:border-white/5 dark:bg-white/5">
         {filters.map((filter) => (
           <button
             key={filter.type}
@@ -502,7 +502,7 @@ export function AlbumView({ id, title }: { id: string; title: string }) {
             <Cover
               coverArt={data.data.album.coverArt}
               size={300}
-              rounded="rounded-2xl"
+              rounded="rounded-lg"
               className="h-28 w-28 shrink-0 shadow-xl shadow-black/20 ring-1 ring-black/5 dark:ring-white/10"
             />
             <div className="min-w-0 flex-1">
