@@ -1,7 +1,9 @@
 //! getAlbum synthesis for virtual `sga_` albums.
 
+use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::response::Response;
+use axum::http::header::{CONTENT_LENGTH, CONTENT_TYPE};
+use axum::response::{IntoResponse, Response};
 use quick_xml::events::{BytesEnd, BytesStart, Event};
 
 use crate::subsonic::types::{Payload, SongEntry};
@@ -22,7 +24,16 @@ pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
     };
 
     if !valbum::is_virtual_album_id(&id) {
-        return passthrough::handler(State(state), req).await;
+        if !matches!(format, Format::Json) {
+            return passthrough::handler(State(state), req).await;
+        }
+        return match repair_real_album_artwork_json(&state, req).await {
+            Ok(response) => response,
+            Err(error) => {
+                tracing::warn!(%error, "real album artwork repair failed");
+                (axum::http::StatusCode::BAD_GATEWAY, "upstream unavailable").into_response()
+            }
+        };
     }
     if !state.config.artist_expansion.enabled {
         return error_not_found(&state.envelope().await, format);
@@ -42,6 +53,69 @@ pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
                 .render_error(format, 0, "internal error")
         }
     }
+}
+
+async fn repair_real_album_artwork_json(
+    state: &AppState,
+    req: Request,
+) -> anyhow::Result<Response> {
+    let (status, mut headers, body) = passthrough::fetch_upstream_identity(state, req).await?;
+    let body_text = match std::str::from_utf8(&body) {
+        Ok(text) if status.is_success() => text,
+        _ => return Ok(super::search::raw_response(status, headers, body.to_vec())),
+    };
+    let mut value: serde_json::Value = match serde_json::from_str(body_text) {
+        Ok(value) => value,
+        Err(_) => return Ok(super::search::raw_response(status, headers, body.to_vec())),
+    };
+    if value["subsonic-response"]["status"].as_str() != Some("ok") {
+        return Ok(super::search::raw_response(status, headers, body.to_vec()));
+    }
+
+    let Some(album) = value["subsonic-response"]["album"].as_object_mut() else {
+        return Ok(super::search::raw_response(status, headers, body.to_vec()));
+    };
+    let songs = album.get_mut("song").and_then(|song| song.as_array_mut());
+    let Some(songs) = songs else {
+        return Ok(super::search::raw_response(status, headers, body.to_vec()));
+    };
+
+    let mut first_repaired_cover: Option<String> = None;
+    let mut repaired_count = 0usize;
+    for song in songs.iter_mut() {
+        let Some(real_id) = song.get("id").and_then(|id| id.as_str()) else {
+            continue;
+        };
+        let Ok(Some(track)) = crate::vtrack::get_by_real_subsonic_id(&state.db, real_id).await
+        else {
+            continue;
+        };
+        if track.artwork_url.is_none() {
+            continue;
+        }
+        song["coverArt"] = serde_json::json!(track.id);
+        first_repaired_cover.get_or_insert_with(|| track.id.clone());
+        repaired_count += 1;
+    }
+
+    if songs.len() == 1 {
+        if let Some(cover) = first_repaired_cover {
+            album["coverArt"] = serde_json::json!(cover);
+        }
+    }
+    if repaired_count > 0 {
+        tracing::debug!(repaired_count, "repaired imported album artwork");
+    }
+
+    let new_body = serde_json::to_vec(&value)?;
+    headers.remove(CONTENT_LENGTH);
+    headers.remove(CONTENT_TYPE);
+    let mut response = Response::builder()
+        .status(status)
+        .header(CONTENT_TYPE, Format::Json.content_type())
+        .body(Body::from(new_body))?;
+    response.headers_mut().extend(headers);
+    Ok(response)
 }
 
 async fn synthesize_album(

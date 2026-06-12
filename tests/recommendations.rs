@@ -67,6 +67,8 @@ async fn spawn_mock_navidrome() -> String {
         .route("/rest/getPlaylists.view", get(playlists_json))
         .route("/rest/getPlaylist", get(upstream_playlist_json))
         .route("/rest/getPlaylist.view", get(upstream_playlist_json))
+        .route("/rest/getRandomSongs", get(random_songs_json))
+        .route("/rest/getRandomSongs.view", get(random_songs_json))
         .route("/rest/scrobble", get(scrobble_ok))
         .route("/rest/scrobble.view", get(scrobble_ok));
     tokio::spawn(async move {
@@ -188,6 +190,27 @@ async fn upstream_playlist_json() -> Json<serde_json::Value> {
                 "songCount": 0,
                 "duration": 0,
                 "entry": []
+            }
+        }
+    }))
+}
+
+async fn random_songs_json() -> Json<serde_json::Value> {
+    Json(json!({
+        "subsonic-response": {
+            "status": "ok",
+            "version": "1.16.1",
+            "type": "navidrome",
+            "serverVersion": "0.62.0-test",
+            "openSubsonic": true,
+            "randomSongs": {
+                "song": [{
+                    "id": "random_local",
+                    "title": "Random Local",
+                    "artist": "Seed Artist",
+                    "duration": 181,
+                    "coverArt": "random_local"
+                }]
             }
         }
     }))
@@ -792,6 +815,82 @@ async fn r3_discovery_playlist_appears_and_serves_recommendations() {
     let xml = String::from_utf8(raw.to_vec()).unwrap();
     assert!(xml.contains(r#"name="Songarr Discovery""#), "{xml}");
     assert!(xml.contains("<entry "), "{xml}");
+}
+
+#[tokio::test]
+async fn wave_next_uses_feedback_seed_and_records_play_feedback() {
+    let _guard = serial();
+    let upstream = spawn_mock_navidrome().await;
+    let ytm = spawn_mock_ytm().await;
+    let proxy = spawn_r1_proxy(&upstream, ytm).await;
+    let seed_id = insert_virtual_seed(&proxy).await;
+    let client = reqwest::Client::new();
+
+    let feedback = client
+        .post(format!(
+            "{}/wave/api/feedback?{}",
+            proxy.url,
+            auth_query(Some("json"))
+        ))
+        .json(&json!({"trackId": seed_id, "action": "like"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(feedback.status(), StatusCode::OK);
+
+    let body: serde_json::Value = client
+        .get(format!(
+            "{}/wave/api/next?{}&count=4",
+            proxy.url,
+            auth_query(Some("json"))
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tracks = body["tracks"].as_array().unwrap();
+    assert!(
+        tracks.iter().any(|track| track["title"] == "Radio New"
+            && track["id"].as_str().unwrap_or("").starts_with("sgr_")
+            && track["streamUrl"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("/rest/stream?")),
+        "wave should return playable recommended tracks: {body}"
+    );
+
+    let played_id = tracks[0]["id"].as_str().unwrap();
+    let feedback = client
+        .post(format!(
+            "{}/wave/api/feedback?{}",
+            proxy.url,
+            auth_query(Some("json"))
+        ))
+        .json(&json!({"trackId": played_id, "action": "play"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(feedback.status(), StatusCode::OK);
+
+    let pool = proxy.db().await;
+    let listen_count: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM listens WHERE username = ? AND subsonic_id = ?")
+            .bind(USER)
+            .bind(played_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(listen_count, 1);
+    let feedback_count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM wave_feedback WHERE username = ? AND action IN ('like', 'play')",
+    )
+    .bind(USER)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(feedback_count, 2);
 }
 
 #[tokio::test]

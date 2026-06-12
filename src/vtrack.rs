@@ -114,6 +114,18 @@ pub async fn get(pool: &SqlitePool, id: &str) -> sqlx::Result<Option<VirtualTrac
     .await
 }
 
+pub async fn get_by_real_subsonic_id(
+    pool: &SqlitePool,
+    real_id: &str,
+) -> sqlx::Result<Option<VirtualTrack>> {
+    sqlx::query_as::<_, VirtualTrack>(&format!(
+        "SELECT {COLUMNS} FROM virtual_tracks WHERE real_subsonic_id = ?"
+    ))
+    .bind(real_id)
+    .fetch_optional(pool)
+    .await
+}
+
 /// Imported tracks, for search dedup (their real files are in the library).
 pub async fn imported(pool: &SqlitePool) -> sqlx::Result<Vec<VirtualTrack>> {
     sqlx::query_as::<_, VirtualTrack>(&format!(

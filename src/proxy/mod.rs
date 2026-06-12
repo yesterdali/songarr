@@ -9,6 +9,7 @@ pub mod search;
 pub mod similar;
 pub mod song;
 pub mod stream;
+pub mod wave;
 
 use axum::extract::{Request, State};
 use axum::response::Response;

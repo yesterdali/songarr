@@ -532,7 +532,7 @@ async fn seed_video_id(state: &AppState, seed: &SeedTrack) -> anyhow::Result<Str
         .ok_or_else(|| anyhow::anyhow!("no YTM song match to seed radio for {query}"))
 }
 
-async fn fetch_real_seed(state: &AppState, id: &str) -> anyhow::Result<SeedTrack> {
+pub(crate) async fn fetch_real_seed(state: &AppState, id: &str) -> anyhow::Result<SeedTrack> {
     let encoded_id: String = url::form_urlencoded::byte_serialize(id.as_bytes()).collect();
     let url = format!(
         "{}/rest/getSong?{}&id={encoded_id}&f=json",

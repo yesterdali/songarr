@@ -1,5 +1,33 @@
 @import "tailwindcss";
 
+@theme {
+  --color-wave-orange: #ff8a3d;
+  --color-wave-pink: #ff4d9d;
+  --color-wave-violet: #a23bff;
+
+  --animate-fade-in: fade-in 0.3s ease both;
+  --animate-slide-up: slide-up 0.45s cubic-bezier(0.32, 0.72, 0, 1) both;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes slide-up {
+    from {
+      transform: translateY(5%);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0);
+      opacity: 1;
+    }
+  }
+}
+
 :root {
   color-scheme: light dark;
 }
@@ -13,4 +41,143 @@ body,
 body {
   margin: 0;
   -webkit-tap-highlight-color: transparent;
+  font-family:
+    ui-rounded,
+    "SF Pro Rounded",
+    system-ui,
+    -apple-system,
+    "Segoe UI",
+    Roboto,
+    sans-serif;
+  background-color: #f6f6f9;
+  color: #131316;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: #09090d;
+    color: #f4f4f6;
+  }
+}
+
+/* Ambient brand glow behind every screen */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60% 40% at 12% -5%, rgb(255 138 61 / 0.14), transparent 60%),
+    radial-gradient(55% 40% at 95% 0%, rgb(162 59 255 / 0.13), transparent 60%),
+    radial-gradient(70% 50% at 50% 112%, rgb(255 77 157 / 0.1), transparent 60%);
+}
+
+/* Hide scrollbars on horizontal carousels */
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+/* Slowly drifting brand gradient (Wave hero card) */
+.wave-hero {
+  background: linear-gradient(
+    120deg,
+    #ff8a3d,
+    #ff4d9d 40%,
+    #a23bff 75%,
+    #ff4d9d
+  );
+  background-size: 250% 250%;
+  animation: wave-pan 14s ease-in-out infinite;
+}
+@keyframes wave-pan {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Seek bar: progress fill driven by the --p custom property */
+input[type="range"].slider {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"].slider::-webkit-slider-runnable-track {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    #ff8a3d,
+    #ff4d9d var(--p, 0%),
+    rgb(255 255 255 / 0.25) var(--p, 0%)
+  );
+}
+input[type="range"].slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -4.5px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.45);
+}
+input[type="range"].slider::-moz-range-track {
+  height: 5px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.25);
+}
+input[type="range"].slider::-moz-range-progress {
+  height: 5px;
+  border-radius: 999px;
+  background: linear-gradient(to right, #ff8a3d, #ff4d9d);
+}
+input[type="range"].slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 1px 6px rgb(0 0 0 / 0.45);
+}
+
+/* Tiny equalizer shown on the playing track */
+.eq {
+  display: flex;
+  align-items: flex-end;
+  gap: 2.5px;
+  height: 14px;
+}
+.eq span {
+  width: 3px;
+  border-radius: 2px;
+  background: currentColor;
+  animation: eq-bounce 1s ease-in-out infinite;
+}
+.eq span:nth-child(2) {
+  animation-delay: -0.4s;
+}
+.eq span:nth-child(3) {
+  animation-delay: -0.7s;
+}
+.eq.paused span {
+  animation-play-state: paused;
+}
+@keyframes eq-bounce {
+  0%,
+  100% {
+    height: 30%;
+  }
+  50% {
+    height: 100%;
+  }
 }

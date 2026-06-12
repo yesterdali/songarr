@@ -55,9 +55,13 @@ pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
         }
     };
 
-    // Imported tracks defer to Navidrome's art for the real id. The real id
-    // is a song id, which getCoverArt accepts (`mf-` lookup happens upstream).
-    if let Some(real_id) = track.real_subsonic_id.clone() {
+    // Imported tracks usually have weak Navidrome album art, but Songarr still
+    // has the original provider artwork. Prefer that when present; otherwise
+    // defer to Navidrome's art for the real id.
+    if track.artwork_url.is_none() {
+        let Some(real_id) = track.real_subsonic_id.clone() else {
+            return error_not_found(&state.envelope().await, format);
+        };
         return super::rewrite_id_and_passthrough(state, req, &real_id).await;
     }
 

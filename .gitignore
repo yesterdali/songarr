@@ -8,3 +8,4 @@
 .DS_Store
 tests/harness/data/
 .claude/settings.local.json
+.claude/

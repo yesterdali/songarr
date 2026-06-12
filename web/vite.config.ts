@@ -17,6 +17,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       // Cache the app shell only; audio and the wave API must stay live.
       workbox: {
+        skipWaiting: true,
+        clientsClaim: true,
         navigateFallbackDenylist: [/^\/rest/, /^\/wave\/api/],
         runtimeCaching: [],
       },

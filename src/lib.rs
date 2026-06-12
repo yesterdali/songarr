@@ -144,7 +144,17 @@ pub fn build_app(state: AppState) -> Router {
                 .route(concat!("/rest/", $endpoint, ".view"), any($handler))
         };
     }
-    let router = Router::new().route("/healthz", get(healthz));
+    let router = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/wave", get(proxy::wave::index))
+        .route("/wave/", get(proxy::wave::index))
+        .route("/wave/spike", get(proxy::wave::spike))
+        .route("/wave/api/next", get(proxy::wave::next_handler))
+        .route(
+            "/wave/api/feedback",
+            axum::routing::post(proxy::wave::feedback_handler),
+        )
+        .route("/wave/{*path}", get(proxy::wave::asset));
     let router = intercept!(router, "search2", proxy::search::search2_handler);
     let router = intercept!(router, "search3", proxy::search::search3_handler);
     let router = intercept!(router, "getSong", proxy::song::handler);
