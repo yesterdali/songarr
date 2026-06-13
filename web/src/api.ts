@@ -366,7 +366,31 @@ export async function getPlaylist(
   };
 }
 
-export async function getLyrics(
+// Memoized per song id: the player warms lyrics for the current/next track,
+// and the lyrics panel then resolves from the same promise instantly.
+const lyricsCache = new Map<string, Promise<LyricsResult | null>>();
+const LYRICS_CACHE_MAX = 40;
+
+export function getLyrics(
+  session: WaveSession,
+  songId: string,
+): Promise<LyricsResult | null> {
+  const cached = lyricsCache.get(songId);
+  if (cached) return cached;
+  const promise = fetchLyrics(session, songId).catch((error: unknown) => {
+    // Failed lookups may be transient — let the next caller retry.
+    lyricsCache.delete(songId);
+    throw error;
+  });
+  if (lyricsCache.size >= LYRICS_CACHE_MAX) {
+    const oldest = lyricsCache.keys().next().value;
+    if (oldest !== undefined) lyricsCache.delete(oldest);
+  }
+  lyricsCache.set(songId, promise);
+  return promise;
+}
+
+async function fetchLyrics(
   session: WaveSession,
   songId: string,
 ): Promise<LyricsResult | null> {

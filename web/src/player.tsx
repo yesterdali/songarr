@@ -14,6 +14,7 @@ import {
 } from "react";
 import {
   coverUrl,
+  getLyrics,
   getStarred,
   getWaveNext,
   star,
@@ -247,14 +248,17 @@ export function PlayerProvider({
     });
   }, [current, session, attach]);
 
-  // Warm the next track (audio) and the large covers of the current and next
-  // tracks, so advancing and opening the full-screen player are both instant.
+  // Warm the next track (audio), the large covers, and the lyrics of the
+  // current and next tracks, so advancing, opening the full-screen player,
+  // and the lyrics button are all instant. getLyrics memoizes per song id.
   useEffect(() => {
     const nextSong = queue[index + 1];
     warmAudio(nextSong);
     warmCovers(current ?? undefined);
     warmCovers(nextSong);
-  }, [queue, index, current, warmAudio, warmCovers]);
+    if (current) getLyrics(session, current.id).catch(() => undefined);
+    if (nextSong) getLyrics(session, nextSong.id).catch(() => undefined);
+  }, [queue, index, current, session, warmAudio, warmCovers]);
 
   // Fetch the first Wave batch and warm its opening tracks + covers, so the
   // big Wave button starts music with no wait. Refreshed when the app comes

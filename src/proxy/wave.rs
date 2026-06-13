@@ -130,8 +130,42 @@ pub async fn next_handler(
                 Vec::new()
             }
         };
+    spawn_lyrics_prefetch(&state, &tracks);
     tracing::info!(username, count = tracks.len(), "served wave next tracks");
     Json(WaveNextResponse { tracks }).into_response()
+}
+
+/// Fill the lyrics cache for a fresh batch in the background, so the lyrics
+/// button is ready the moment a recommended track starts playing.
+fn spawn_lyrics_prefetch(state: &AppState, tracks: &[WaveTrack]) {
+    const PREFETCH_COUNT: usize = 6;
+    if !state.config.lyrics.enabled || tracks.is_empty() {
+        return;
+    }
+    let songs: Vec<_> = tracks
+        .iter()
+        .take(PREFETCH_COUNT)
+        .map(|track| {
+            (
+                track.artist.clone(),
+                track.title.clone(),
+                track.album.clone(),
+                track.duration_secs,
+            )
+        })
+        .collect();
+    let state = state.clone();
+    tokio::spawn(async move {
+        for (artist, title, album, duration_secs) in songs {
+            // Sequential on purpose: cache misses go out to LRCLIB, stay polite.
+            if let Err(error) =
+                crate::lyrics::lookup(&state, &artist, &title, album.as_deref(), duration_secs)
+                    .await
+            {
+                tracing::debug!(%error, artist, title, "wave lyrics prefetch failed");
+            }
+        }
+    });
 }
 
 pub async fn feedback_handler(
