@@ -31,6 +31,26 @@ pub struct Config {
     pub recommendations: Recommendations,
     #[serde(default)]
     pub artist_expansion: ArtistExpansion,
+    #[serde(default)]
+    pub lyrics: Lyrics,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Lyrics {
+    /// getLyricsBySongId fallback lookup for tracks without Navidrome lyrics.
+    pub enabled: bool,
+    /// Override for tests / API proxies; normally leave at LRCLIB.
+    pub lrclib_api_base: String,
+}
+
+impl Default for Lyrics {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            lrclib_api_base: "https://lrclib.net".into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -314,6 +334,8 @@ mod tests {
         assert_eq!(config.streaming.format, StreamFormat::Opus);
         assert_eq!(config.upgrade.mode, UpgradeMode::None);
         assert_eq!(config.recommendations.cache_ttl_hours, 72);
+        assert!(config.lyrics.enabled);
+        assert_eq!(config.lyrics.lrclib_api_base, "https://lrclib.net");
         assert!(config.users.deny.is_empty());
     }
 

@@ -94,9 +94,18 @@ function ArtistRow({ artist }: { artist: Artist }) {
       onClick={() => nav.push({ name: "artist", id: artist.id, title: artist.name })}
       className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-black/[0.04] active:bg-black/[0.06] dark:hover:bg-white/[0.04] dark:active:bg-white/[0.07]"
     >
-      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-wave-orange/80 to-wave-violet/80 text-base font-bold text-white">
-        {artist.name.slice(0, 1).toUpperCase()}
-      </span>
+      {artist.coverArt ? (
+        <Cover
+          coverArt={artist.coverArt}
+          size={96}
+          rounded="rounded-full"
+          className="h-11 w-11 shrink-0 shadow-md shadow-black/10 ring-1 ring-black/5 dark:ring-white/10"
+        />
+      ) : (
+        <span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-gradient-to-br from-wave-orange/80 to-wave-violet/80 text-base font-bold text-white">
+          {artist.name.slice(0, 1).toUpperCase()}
+        </span>
+      )}
       <span className="min-w-0 flex-1 truncate text-sm font-semibold">{artist.name}</span>
       <ChevronLeftIcon className="h-4 w-4 rotate-180 text-neutral-400 dark:text-neutral-600" />
     </button>
@@ -335,7 +344,10 @@ const LIBRARY_TILES = [
 export function LibraryView() {
   const { session } = usePlayer();
   const nav = useNav();
-  const artists = useAsync(() => api.getArtists(session), [session]);
+  const artists = useAsync(
+    async () => api.repairArtistCovers(session, await api.getArtists(session), 80),
+    [session],
+  );
   const actions = [
     () => nav.setTab("playlists"),
     () => nav.push({ name: "albums" as const }),

@@ -40,3 +40,15 @@ export type Playlist = {
   owner?: string;
   comment?: string;
 };
+
+export type LyricsLine = {
+  start?: number; // milliseconds
+  value: string;
+};
+
+export type LyricsResult = {
+  artist?: string;
+  title?: string;
+  synced: boolean;
+  lines: LyricsLine[];
+};

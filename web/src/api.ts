@@ -4,7 +4,9 @@
 // the same plain Subsonic calls surface external content for free.
 
 import { apiUrl, authQuery, type WaveSession } from "./auth";
-import type { Album, Artist, Playlist, Song } from "./types";
+import type { Album, Artist, LyricsResult, Playlist, Song } from "./types";
+
+const ARTIST_COVER_CACHE_VERSION = "songarr.wave.artistCovers.v1";
 
 type Envelope = {
   "subsonic-response"?: {
@@ -43,6 +45,46 @@ function asArray<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
   if (value === undefined || value === null) return [];
   return [value as T];
+}
+
+function localStorageOrNull(): Storage | null {
+  try {
+    return typeof window === "undefined" ? null : window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function artistCoverCacheKey(session: WaveSession): string {
+  return `${ARTIST_COVER_CACHE_VERSION}:${session.serverUrl}:${session.username}`;
+}
+
+function readArtistCoverCache(session: WaveSession): Record<string, string> {
+  const storage = localStorageOrNull();
+  if (!storage) return {};
+  try {
+    const parsed = JSON.parse(storage.getItem(artistCoverCacheKey(session)) ?? "{}");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] =>
+          typeof entry[0] === "string" && typeof entry[1] === "string",
+      ),
+    );
+  } catch {
+    return {};
+  }
+}
+
+function writeArtistCoverCache(session: WaveSession, cache: Record<string, string>): void {
+  const storage = localStorageOrNull();
+  if (!storage) return;
+  const entries = Object.entries(cache).slice(-1000);
+  try {
+    storage.setItem(artistCoverCacheKey(session), JSON.stringify(Object.fromEntries(entries)));
+  } catch {
+    // localStorage can be full or unavailable in private browsing; covers still work live.
+  }
 }
 
 type RawSong = {
@@ -132,6 +174,30 @@ function toPlaylist(raw: RawPlaylist): Playlist {
   };
 }
 
+type RawLyricsLine = {
+  start?: number;
+  value?: string;
+};
+
+type RawStructuredLyrics = {
+  displayArtist?: string;
+  displayTitle?: string;
+  synced?: boolean;
+  line?: unknown;
+};
+
+function toLyrics(raw: RawStructuredLyrics): LyricsResult {
+  const lines = asArray<RawLyricsLine>(raw.line)
+    .map((line) => ({ start: line.start, value: line.value ?? "" }))
+    .filter((line) => line.value.trim() !== "");
+  return {
+    artist: raw.displayArtist,
+    title: raw.displayTitle,
+    synced: Boolean(raw.synced),
+    lines,
+  };
+}
+
 // ---- URLs the <audio> tag and <img> tags hit directly ----
 
 export function streamUrl(session: WaveSession, id: string): string {
@@ -192,6 +258,41 @@ export async function getArtist(
     artist: toArtist(raw ?? { id }),
     albums: asArray<RawAlbum>(raw?.album).map(toAlbum),
   };
+}
+
+export async function repairArtistCovers(
+  session: WaveSession,
+  artists: Artist[],
+  limit = artists.length,
+): Promise<Artist[]> {
+  const cache = readArtistCoverCache(session);
+  let changed = false;
+  let repairs = 0;
+  const withCached = artists.map((artist) => {
+    const cached = cache[artist.id];
+    return artist.coverArt || !cached ? artist : { ...artist, coverArt: cached };
+  });
+
+  const repaired = await Promise.all(
+    withCached.map(async (artist) => {
+      if (artist.coverArt || repairs >= limit) return artist;
+      repairs += 1;
+      try {
+        const detail = await getArtist(session, artist.id);
+        const coverArt =
+          detail.artist.coverArt ?? detail.albums.find((album) => album.coverArt)?.coverArt;
+        if (!coverArt) return artist;
+        cache[artist.id] = coverArt;
+        changed = true;
+        return { ...artist, coverArt };
+      } catch {
+        return artist;
+      }
+    }),
+  );
+
+  if (changed) writeArtistCoverCache(session, cache);
+  return repaired;
 }
 
 export async function getAlbum(
@@ -263,6 +364,19 @@ export async function getPlaylist(
     playlist: toPlaylist(raw ?? { id }),
     songs: asArray<RawSong>(raw?.entry).map(toSong),
   };
+}
+
+export async function getLyrics(
+  session: WaveSession,
+  songId: string,
+): Promise<LyricsResult | null> {
+  const list = (await call(session, "getLyricsBySongId", { id: songId }))[
+    "lyricsList"
+  ] as { structuredLyrics?: unknown } | undefined;
+  const first = asArray<RawStructuredLyrics>(list?.structuredLyrics)[0];
+  if (!first) return null;
+  const lyrics = toLyrics(first);
+  return lyrics.lines.length > 0 ? lyrics : null;
 }
 
 export async function getStarred(

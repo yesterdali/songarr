@@ -138,8 +138,7 @@ async fn repaired_imported_artwork(
     let album_req = Request::builder()
         .uri(format!("/rest/getAlbum?{query}"))
         .body(Body::empty())?;
-    let (status, _headers, body) =
-        passthrough::fetch_upstream_identity(state, album_req).await?;
+    let (status, _headers, body) = passthrough::fetch_upstream_identity(state, album_req).await?;
     if !status.is_success() {
         return Ok(None);
     }

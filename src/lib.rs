@@ -3,6 +3,7 @@ pub mod config;
 pub mod db;
 pub mod ingest;
 pub mod jobs;
+pub mod lyrics;
 pub mod pending;
 pub mod proxy;
 pub mod recs;

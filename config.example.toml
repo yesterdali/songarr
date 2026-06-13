@@ -56,6 +56,10 @@ include_singles = true
 include_top_tracks_album = true
 min_artist_match_score = 70     # Cyrillic/Latin resolver confidence gate
 
+[lyrics]
+enabled = true                  # getLyricsBySongId fallback via LRCLIB
+lrclib_api_base = "https://lrclib.net"
+
 [upgrade]
 mode = "none"                   # none | soulsync_wishlist (best-effort, see M6)
 soulsync_url = "http://soulsync:8888"

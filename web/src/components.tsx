@@ -3,6 +3,7 @@ import {
   BanIcon,
   ChevronLeftIcon,
   HeartIcon,
+  LyricsIcon,
   MusicNoteIcon,
   NextIcon,
   PauseIcon,
@@ -10,9 +11,10 @@ import {
   PrevIcon,
   QueueIcon,
 } from "./icons";
+import { getLyrics } from "./api";
 import { useNav } from "./nav";
 import { formatTime, usePlayer } from "./player";
-import type { Song } from "./types";
+import type { LyricsResult, Song } from "./types";
 
 export function Cover({
   coverArt,
@@ -250,9 +252,128 @@ function QueueScreen({ onClose }: { onClose: () => void }) {
   );
 }
 
+function activeLyricsIndex(lyrics: LyricsResult | null, currentTime: number): number {
+  if (!lyrics?.synced) return -1;
+  const nowMs = currentTime * 1000 + 150;
+  let active = -1;
+  for (let i = 0; i < lyrics.lines.length; i += 1) {
+    const start = lyrics.lines[i].start;
+    if (start === undefined || start > nowMs) break;
+    active = i;
+  }
+  return active;
+}
+
+function LyricsScreen({
+  current,
+  onClose,
+  lyrics,
+  loading,
+  currentTime,
+  seek,
+}: {
+  current: Song;
+  onClose: () => void;
+  lyrics: LyricsResult | null;
+  loading: boolean;
+  currentTime: number;
+  seek: (seconds: number) => void;
+}) {
+  const active = activeLyricsIndex(lyrics, currentTime);
+  return (
+    <div className="fixed inset-0 z-30 animate-slide-up overflow-hidden bg-neutral-950 text-white">
+      <div className="absolute inset-0">
+        <Cover
+          coverArt={current.coverArt}
+          size={80}
+          rounded=""
+          className="h-full w-full scale-125 opacity-45 blur-3xl saturate-150"
+        />
+        <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/60 to-black/85" />
+      </div>
+
+      <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)]">
+        <header className="mb-5 flex items-center">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="back"
+            className="grid h-10 w-10 place-items-center rounded-full bg-white/10 text-white backdrop-blur transition-transform active:scale-90"
+          >
+            <ChevronLeftIcon className="h-6 w-6" />
+          </button>
+          <span className="flex-1 text-center text-xs font-bold uppercase tracking-[0.2em] text-white/60">
+            Текст песни
+          </span>
+          <span className="h-10 w-10" />
+        </header>
+
+        <div className="mb-6 flex items-center gap-3">
+          <Cover
+            coverArt={current.coverArt}
+            size={96}
+            rounded="rounded-xl"
+            className="h-14 w-14 shrink-0 shadow-lg ring-1 ring-white/10"
+          />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-xl font-extrabold tracking-tight">{current.title}</h2>
+            <p className="truncate text-sm font-medium text-white/60">{current.artist}</p>
+          </div>
+          {lyrics?.synced && (
+            <span className="rounded-full border border-wave-pink/30 bg-wave-pink/10 px-2.5 py-1 text-[0.65rem] font-bold uppercase tracking-[0.16em] text-wave-pink/90">
+              live
+            </span>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="grid min-h-0 flex-1 place-items-center text-center">
+            <p className="text-base font-bold text-white/50">Ищем текст...</p>
+          </div>
+        ) : !lyrics ? (
+          <div className="grid min-h-0 flex-1 place-items-center text-center">
+            <div>
+              <LyricsIcon className="mx-auto mb-4 h-10 w-10 text-white/30" />
+              <p className="text-lg font-extrabold text-white/60">Текста пока нет.</p>
+              <p className="mt-2 text-sm font-medium text-white/35">
+                Если текст есть у провайдера, он появится здесь.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto pb-8 pr-1">
+            {lyrics.lines.map((line, index) => {
+              const isActive = index === active;
+              const canSeek = lyrics.synced && line.start !== undefined;
+              return (
+                <button
+                  key={`${line.start ?? index}-${line.value}`}
+                  type="button"
+                  disabled={!canSeek}
+                  onClick={() => {
+                    if (line.start !== undefined) seek(line.start / 1000);
+                  }}
+                  className={`block w-full rounded-xl px-2 py-2.5 text-left text-2xl font-extrabold leading-tight transition-colors ${
+                    isActive
+                      ? "text-white"
+                      : "text-white/40 enabled:active:text-wave-pink"
+                  }`}
+                >
+                  {line.value}
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
   const nav = useNav();
   const {
+    session,
     current,
     isPlaying,
     currentTime,
@@ -266,6 +387,32 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
     dislikeCurrent,
   } = usePlayer();
   const [queueOpen, setQueueOpen] = useState(false);
+  const [lyricsOpen, setLyricsOpen] = useState(false);
+  const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
+  const [lyricsLoading, setLyricsLoading] = useState(false);
+  useEffect(() => {
+    if (!current) {
+      setLyrics(null);
+      setLyricsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLyrics(null);
+    setLyricsLoading(true);
+    getLyrics(session, current.id)
+      .then((result) => {
+        if (!cancelled) setLyrics(result);
+      })
+      .catch(() => {
+        if (!cancelled) setLyrics(null);
+      })
+      .finally(() => {
+        if (!cancelled) setLyricsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [current?.id, session]);
   if (!current) return null;
   const displayDuration = duration || current.duration || 0;
   const displayTime = displayDuration ? Math.min(currentTime, displayDuration) : currentTime;
@@ -421,11 +568,31 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {/* Free space below the controls — reserved for lyrics & friends. */}
-        <div className="flex-1" />
+        <div className="mt-5 flex justify-center">
+          <button
+            type="button"
+            onClick={() => setLyricsOpen(true)}
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-bold text-white/75 ring-1 ring-white/10 backdrop-blur transition active:scale-95 active:text-white"
+          >
+            <LyricsIcon className="h-5 w-5" />
+            <span>{lyricsLoading ? "Ищем текст" : "Текст"}</span>
+          </button>
+        </div>
+
+        <div className="min-h-4 flex-1" />
       </div>
 
       {queueOpen && <QueueScreen onClose={() => setQueueOpen(false)} />}
+      {lyricsOpen && current && (
+        <LyricsScreen
+          current={current}
+          onClose={() => setLyricsOpen(false)}
+          lyrics={lyrics}
+          loading={lyricsLoading}
+          currentTime={displayTime}
+          seek={seek}
+        />
+      )}
     </div>
   );
 }

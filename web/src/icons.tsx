@@ -144,6 +144,15 @@ export function MusicNoteIcon({ className = "" }: IconProps) {
   );
 }
 
+export function LyricsIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={className}>
+      <path strokeLinecap="round" strokeWidth="2" d="M6 6h12M6 11h9M6 16h6" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="m15 16 2 2 4-5" />
+    </svg>
+  );
+}
+
 export function ChevronLeftIcon({ className = "" }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" className={className}>

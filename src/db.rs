@@ -47,6 +47,7 @@ mod tests {
             "stream_jobs",
             "pending_actions",
             "upgrade_requests",
+            "lyrics_cache",
         ] {
             let found: Option<String> =
                 sqlx::query_scalar("SELECT name FROM sqlite_master WHERE type='table' AND name=?")
