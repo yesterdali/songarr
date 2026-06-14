@@ -315,6 +315,20 @@ async fn next_tracks(
     }
 
     if tracks.len() < count {
+        let remaining = count - tracks.len();
+        extend_from_yandex_wave(
+            state,
+            username,
+            auth_stream,
+            &suppression,
+            &mut existing,
+            &mut tracks,
+            remaining,
+        )
+        .await;
+    }
+
+    if tracks.len() < count {
         match random_tracks(state, auth_stream, auth_json, count - tracks.len()).await {
             Ok(random) => {
                 for track in random {
@@ -344,6 +358,81 @@ async fn next_tracks(
     }
 
     Ok(tracks)
+}
+
+async fn extend_from_yandex_wave(
+    state: &AppState,
+    username: &str,
+    auth_stream: &str,
+    suppression: &FeedbackSuppression,
+    existing: &mut Vec<crate::proxy::search::SongKey>,
+    tracks: &mut Vec<WaveTrack>,
+    count: usize,
+) {
+    let cfg = &state.config.recommendations;
+    if count == 0 || cfg.weight_yandex <= 0.0 || !crate::yandex::available(&state.config.yandex) {
+        return;
+    }
+    let fetch_limit = count.saturating_mul(2).clamp(count, MAX_NEXT_COUNT);
+    let seed_key = format!("user:{username}");
+    let candidates = match crate::recs::cache_get(
+        &state.db,
+        "yandex_wave",
+        &seed_key,
+        cfg.cache_ttl_hours,
+    )
+    .await
+    {
+        Ok(Some(cached)) => cached,
+        Ok(None) => match crate::recs::yandex::wave(&state.config.yandex, fetch_limit).await {
+            Ok(candidates) => {
+                let _ =
+                    crate::recs::cache_set(&state.db, "yandex_wave", &seed_key, &candidates).await;
+                candidates
+            }
+            Err(error) => {
+                tracing::debug!(%error, username, "Yandex wave source abstained");
+                return;
+            }
+        },
+        Err(error) => {
+            tracing::debug!(%error, username, "Yandex wave cache read failed");
+            return;
+        }
+    };
+
+    let entries = match crate::proxy::similar::upsert_candidates(
+        state,
+        username,
+        candidates,
+        fetch_limit,
+        existing,
+    )
+    .await
+    {
+        Ok(entries) => entries,
+        Err(error) => {
+            tracing::debug!(%error, username, "Yandex wave upsert failed");
+            return;
+        }
+    };
+
+    let target_len = tracks.len() + count;
+    for entry in entries {
+        if suppression.is_suppressed(&entry.artist, &entry.title) {
+            continue;
+        }
+        let key =
+            crate::proxy::search::SongKey::new(&entry.artist, &entry.title, entry.duration_secs);
+        if tracks.iter().any(|t| t.id == entry.id) || existing.iter().any(|e| e.matches(&key)) {
+            continue;
+        }
+        existing.push(key);
+        tracks.push(wave_track_from_entry(entry, auth_stream));
+        if tracks.len() >= target_len {
+            break;
+        }
+    }
 }
 
 async fn extend_from_seed(

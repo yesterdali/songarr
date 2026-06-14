@@ -16,7 +16,7 @@ staging_dir = "/staging"
 
 [external_search]
 enabled = true
-provider = "deezer"             # deezer | ytmusic | both
+provider = "deezer"             # deezer | ytmusic | yandex | both
 max_results = 8                 # virtual results appended per search
 min_query_len = 3
 
@@ -45,7 +45,18 @@ cache_ttl_hours = 72
 weight_ytm = 1.0
 weight_deezer = 0.6
 weight_lastfm = 0.8             # requires lastfm_api_key
+weight_yandex = 1.2             # requires [yandex].enabled + token
 lastfm_api_key = ""
+
+[yandex]
+enabled = false                 # uses unofficial yandex-music-api helper
+helper_path = "/usr/local/bin/songarr-yandex"
+access_token = ""               # prefer SONGARR_YANDEX_ACCESS_TOKEN / Docker secret injection
+refresh_token = ""              # optional, reserved for helper refresh support
+use_for_wave = true
+use_for_search = true
+use_for_import = true           # Yandex-origin tracks try Yandex audio before YouTube fallback
+api_timeout_secs = 10
 
 [artist_expansion]
 enabled = true                  # show external provider albums under getArtist

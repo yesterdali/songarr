@@ -100,13 +100,7 @@ async fn intercepted(
         }
     };
 
-    let catalog = match crate::catalog::search(
-        &state.http,
-        &state.config.external_search,
-        search_query,
-    )
-    .await
-    {
+    let catalog = match crate::catalog::search(&state.http, &state.config, search_query).await {
         Ok(results) => results,
         Err(error) => {
             tracing::warn!(%error, query = search_query, "catalog search failed; returning vanilla results");

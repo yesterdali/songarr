@@ -33,6 +33,39 @@ pub struct Config {
     pub artist_expansion: ArtistExpansion,
     #[serde(default)]
     pub lyrics: Lyrics,
+    #[serde(default)]
+    pub yandex: Yandex,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Yandex {
+    pub enabled: bool,
+    /// Path to the JSON helper. The Docker image installs this here; tests
+    /// override it with a mock helper.
+    pub helper_path: String,
+    /// Server-side account tokens. Leave empty to keep the provider inactive.
+    pub access_token: String,
+    pub refresh_token: String,
+    pub use_for_wave: bool,
+    pub use_for_search: bool,
+    pub use_for_import: bool,
+    pub api_timeout_secs: u64,
+}
+
+impl Default for Yandex {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            helper_path: "/usr/local/bin/songarr-yandex".into(),
+            access_token: String::new(),
+            refresh_token: String::new(),
+            use_for_wave: true,
+            use_for_search: true,
+            use_for_import: true,
+            api_timeout_secs: 10,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,6 +129,7 @@ pub struct Recommendations {
     pub weight_ytm: f32,
     pub weight_deezer: f32,
     pub weight_lastfm: f32,
+    pub weight_yandex: f32,
     pub lastfm_api_key: String,
     /// Override for tests; rarely set by hand. YTM song-radio lives on
     /// music.youtube.com, not www.
@@ -114,6 +148,7 @@ impl Default for Recommendations {
             weight_ytm: 1.0,
             weight_deezer: 0.6,
             weight_lastfm: 0.8,
+            weight_yandex: 1.2,
             lastfm_api_key: String::new(),
             ytm_api_base: "https://music.youtube.com".into(),
             lastfm_api_base: "https://ws.audioscrobbler.com/2.0".into(),
@@ -203,6 +238,7 @@ impl Default for ExternalSearch {
 pub enum Provider {
     Deezer,
     Ytmusic,
+    Yandex,
     Both,
 }
 
@@ -316,9 +352,30 @@ impl Config {
     pub fn load(path: &Path) -> anyhow::Result<Self> {
         let raw = std::fs::read_to_string(path)
             .with_context(|| format!("reading config file {}", path.display()))?;
-        let config: Config = toml::from_str(&raw)
+        let mut config: Config = toml::from_str(&raw)
             .with_context(|| format!("parsing config file {}", path.display()))?;
+        config.apply_env_overrides();
         Ok(config)
+    }
+
+    fn apply_env_overrides(&mut self) {
+        if let Ok(value) = std::env::var("SONGARR_YANDEX_ENABLED") {
+            self.yandex.enabled = matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            );
+        }
+        if let Ok(value) = std::env::var("SONGARR_YANDEX_HELPER_PATH") {
+            if !value.trim().is_empty() {
+                self.yandex.helper_path = value;
+            }
+        }
+        if let Ok(value) = std::env::var("SONGARR_YANDEX_ACCESS_TOKEN") {
+            self.yandex.access_token = value;
+        }
+        if let Ok(value) = std::env::var("SONGARR_YANDEX_REFRESH_TOKEN") {
+            self.yandex.refresh_token = value;
+        }
     }
 }
 
@@ -334,8 +391,11 @@ mod tests {
         assert_eq!(config.streaming.format, StreamFormat::Opus);
         assert_eq!(config.upgrade.mode, UpgradeMode::None);
         assert_eq!(config.recommendations.cache_ttl_hours, 72);
+        assert_eq!(config.recommendations.weight_yandex, 1.2);
         assert!(config.lyrics.enabled);
         assert_eq!(config.lyrics.lrclib_api_base, "https://lrclib.net");
+        assert!(!config.yandex.enabled);
+        assert!(config.yandex.use_for_import);
         assert!(config.users.deny.is_empty());
     }
 

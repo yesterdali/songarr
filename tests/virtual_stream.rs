@@ -11,9 +11,13 @@ mod common;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use axum::body::Bytes;
+use axum::routing::get;
+use axum::Router;
 use common::*;
 use reqwest::StatusCode;
 use songarr_proxy::config::Config;
+use songarr_proxy::vtrack::{self, CatalogTrack};
 
 fn mock_ytdlp(name: &str) -> String {
     format!("{}/tests/harness/bin/{name}", env!("CARGO_MANIFEST_DIR"))
@@ -29,6 +33,53 @@ fn fixture_size() -> u64 {
         .len()
 }
 
+async fn spawn_mock_audio() -> String {
+    let bytes = std::fs::read(fixture_path()).expect("fixture exists");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let router = Router::new().route(
+        "/audio.webm",
+        get(move || {
+            let bytes = bytes.clone();
+            async move { ([("content-type", "audio/webm")], Bytes::from(bytes)) }
+        }),
+    );
+    tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    format!("{base}/audio.webm")
+}
+
+fn mock_yandex_helper(url: &str) -> String {
+    let dir = std::env::temp_dir().join(format!("songarr-yandex-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("songarr-yandex");
+    std::fs::write(
+        &path,
+        format!(
+            r#"#!/usr/bin/env python3
+import json, sys
+cmd = sys.argv[1]
+if cmd == "download":
+    print(json.dumps({{"url": "{url}", "codec": "webm", "bitrateKbps": 128}}))
+elif cmd in ("wave", "search"):
+    print("[]")
+else:
+    sys.exit(2)
+"#
+        ),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+    }
+    path.to_string_lossy().into_owned()
+}
+
 async fn spawn_m3_proxy(deezer: &str, customize: impl FnOnce(&mut Config)) -> TestProxy {
     let deezer = deezer.to_string();
     spawn_proxy_handle(&navidrome_url(), move |config| {
@@ -37,6 +88,25 @@ async fn spawn_m3_proxy(deezer: &str, customize: impl FnOnce(&mut Config)) -> Te
         customize(config);
     })
     .await
+}
+
+async fn insert_yandex_track(proxy: &TestProxy) -> String {
+    let pool = proxy.db().await;
+    vtrack::upsert(
+        &pool,
+        &CatalogTrack {
+            provider: "yandex",
+            provider_track_id: "ya-track-1".into(),
+            artist: "Yandex Artist".into(),
+            title: "Yandex Direct".into(),
+            album: Some("Yandex Album".into()),
+            duration_ms: Some(180_000),
+            isrc: None,
+            artwork_url: None,
+        },
+    )
+    .await
+    .unwrap()
 }
 
 /// Search through the proxy and return the virtual id of "Mock Song One".
@@ -99,6 +169,80 @@ fn assert_ffprobe_codec(path: &std::path::Path, expected: &str) {
     assert!(
         codecs.lines().any(|c| c.trim() == expected),
         "expected codec {expected} in {path:?}, got: {codecs}"
+    );
+}
+
+#[tokio::test]
+async fn yandex_virtual_stream_uses_helper_audio_first() {
+    let _guard = serial();
+    let source_url = spawn_mock_audio().await;
+    let helper = mock_yandex_helper(&source_url);
+    let proxy = spawn_proxy_handle("http://127.0.0.1:9", move |config| {
+        config.yandex.enabled = true;
+        config.yandex.access_token = "test-token".into();
+        config.yandex.helper_path = helper;
+        config.yandex.use_for_import = true;
+    })
+    .await;
+    let id = insert_yandex_track(&proxy).await;
+
+    let (status, headers, body) = fetch(
+        &proxy.url,
+        &format!("/rest/stream?{}&id={id}", auth_query(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get("content-type").unwrap(), "audio/ogg");
+    assert!(body.starts_with(b"OggS"));
+
+    let (_job, staging) = wait_for_job_status(&proxy, "finalizing").await;
+    assert!(std::path::Path::new(&staging).exists());
+    let pool = proxy.db().await;
+    let row: (String, i64) =
+        sqlx::query_as("SELECT source_url, match_score FROM stream_jobs LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(row.0, source_url);
+    assert_eq!(row.1, 100);
+}
+
+#[tokio::test]
+async fn yandex_virtual_stream_falls_back_to_youtube_when_helper_audio_fails() {
+    let _guard = serial();
+    assert!(
+        fixture_path().exists(),
+        "fixture missing — run tests/harness/seed.sh"
+    );
+    let helper = mock_yandex_helper("http://127.0.0.1:9/nope.webm");
+    let proxy = spawn_proxy_handle("http://127.0.0.1:9", move |config| {
+        config.streaming.ytdlp_path = mock_ytdlp("yt-dlp");
+        config.yandex.enabled = true;
+        config.yandex.access_token = "test-token".into();
+        config.yandex.helper_path = helper;
+        config.yandex.use_for_import = true;
+    })
+    .await;
+    let id = insert_yandex_track(&proxy).await;
+
+    let (status, headers, body) = fetch(
+        &proxy.url,
+        &format!("/rest/stream?{}&id={id}", auth_query(None)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers.get("content-type").unwrap(), "audio/ogg");
+    assert!(body.starts_with(b"OggS"));
+
+    let pool = proxy.db().await;
+    let row: (String,) = sqlx::query_as("SELECT source_url FROM stream_jobs LIMIT 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert!(
+        row.0.starts_with("https://www.youtube.com/watch"),
+        "expected YouTube fallback, got {}",
+        row.0
     );
 }
 

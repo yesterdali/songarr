@@ -11,6 +11,7 @@ pub mod resolve;
 pub mod subsonic;
 pub mod valbum;
 pub mod vtrack;
+pub mod yandex;
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

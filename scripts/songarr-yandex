@@ -1,0 +1,306 @@
+#!/usr/bin/env python3
+"""Songarr <-> Yandex Music JSON helper.
+
+This intentionally keeps unofficial Yandex Music API usage outside the Rust
+binary. Rust sends one JSON object on stdin and expects JSON on stdout.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from typing import Any, Iterable
+
+
+def fail(message: str, code: int = 1) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
+try:
+    from yandex_music import Client
+    from yandex_music.utils.request import Request
+except Exception as exc:  # pragma: no cover - exercised in deployment, not tests
+    fail(f"Cannot import yandex_music. Install yandex-music-api: {exc}")
+
+
+def read_payload() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    if not raw:
+        return {}
+    return json.loads(raw)
+
+
+def client_from_payload(payload: dict[str, Any]) -> Any:
+    token = payload.get("accessToken") or payload.get("access_token")
+    if not token:
+        fail("accessToken is required")
+    client = Client(token, request=Request(timeout=(10, 30)))
+    init = getattr(client, "init", None)
+    if callable(init):
+        client = init()
+    return client
+
+
+def first_attr(obj: Any, *names: str) -> Any:
+    for name in names:
+        if isinstance(obj, dict) and name in obj:
+            return obj[name]
+        value = getattr(obj, name, None)
+        if value is not None:
+            return value
+    return None
+
+
+def cover_url(uri: Any) -> str | None:
+    if not uri:
+        return None
+    value = str(uri)
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return f"https://{value.replace('%%', '400x400')}"
+
+
+def iter_artists(track: Any) -> Iterable[str]:
+    for artist in first_attr(track, "artists") or []:
+        name = first_attr(artist, "name")
+        if name:
+            yield str(name)
+
+
+def serialize_track(track: Any) -> dict[str, Any] | None:
+    track_id = first_attr(track, "id", "track_id", "trackId")
+    title = first_attr(track, "title")
+    artists = list(iter_artists(track))
+    if not track_id or not title or not artists:
+        return None
+
+    albums = first_attr(track, "albums") or []
+    album = albums[0] if albums else None
+    album_title = first_attr(album, "title") if album else None
+    artwork = first_attr(track, "cover_uri", "coverUri", "og_image", "ogImage") or (
+        first_attr(album, "cover_uri", "coverUri", "og_image", "ogImage")
+        if album
+        else None
+    )
+    duration_ms = first_attr(track, "duration_ms", "durationMs")
+    if duration_ms is None:
+        duration = first_attr(track, "duration")
+        duration_ms = (
+            int(duration * 1000) if isinstance(duration, (int, float)) else None
+        )
+
+    return {
+        "trackId": str(track_id),
+        "artist": ", ".join(artists),
+        "title": str(title),
+        "album": str(album_title) if album_title else None,
+        "durationMs": int(duration_ms) if duration_ms is not None else None,
+        "isrc": first_attr(track, "isrc"),
+        "artworkUrl": cover_url(artwork),
+    }
+
+
+def compact_tracks(items: Iterable[Any], limit: int) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in items:
+        track = first_attr(item, "track") or item
+        serialized = serialize_track(track)
+        if not serialized:
+            continue
+        key = serialized["trackId"]
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(serialized)
+        if len(out) >= limit:
+            break
+    return out
+
+
+def cmd_search(payload: dict[str, Any]) -> None:
+    client = client_from_payload(payload)
+    query = payload.get("query") or ""
+    limit = int(payload.get("limit") or 20)
+    result = client.search(query, type_="track")
+    tracks = first_attr(first_attr(result, "tracks"), "results") or []
+    print(json.dumps(compact_tracks(tracks, limit), ensure_ascii=False))
+
+
+def liked_tracks(client: Any) -> list[Any]:
+    likes = client.users_likes_tracks()
+    if not likes:
+        return []
+    refs = likes if isinstance(likes, list) else first_attr(likes, "tracks") or []
+    tracks = []
+    for ref in refs:
+        fetch = getattr(ref, "fetch_track", None)
+        if callable(fetch):
+            try:
+                tracks.append(fetch())
+                continue
+            except Exception:
+                pass
+        track_id = first_attr(ref, "id", "track_id", "trackId")
+        if track_id:
+            try:
+                fetched = client.tracks([track_id])
+                if fetched:
+                    tracks.append(fetched[0])
+            except Exception:
+                pass
+    return tracks
+
+
+def rotor_tracks(client: Any) -> list[Any]:
+    station_id = "user:onyourwave"
+    try:
+        stations = client.rotor_stations_list()
+        for station in stations or []:
+            station_obj = first_attr(station, "station") or station
+            sid = first_attr(station_obj, "id_for_from", "id")
+            name = (first_attr(station_obj, "name") or "").lower()
+            if sid and ("wave" in str(sid).lower() or "волна" in name):
+                station_id = sid
+                break
+    except Exception:
+        pass
+    try:
+        result = client.rotor_station_tracks(station_id)
+    except Exception:
+        return []
+    sequence = first_attr(result, "sequence") or []
+    return [first_attr(item, "track") or item for item in sequence]
+
+
+def cmd_wave(payload: dict[str, Any]) -> None:
+    client = client_from_payload(payload)
+    limit = int(payload.get("limit") or 30)
+    tracks = compact_tracks(rotor_tracks(client), limit)
+    if len(tracks) < limit:
+        tracks.extend(
+            item
+            for item in compact_tracks(liked_tracks(client), limit)
+            if item["trackId"] not in {track["trackId"] for track in tracks}
+        )
+    print(json.dumps(tracks[:limit], ensure_ascii=False))
+
+
+def best_download_info(track: Any) -> Any:
+    infos = None
+    getter = getattr(track, "get_download_info", None)
+    if callable(getter):
+        infos = getter()
+    if not infos:
+        client = first_attr(track, "client")
+        track_id = first_attr(track, "id")
+        if client and hasattr(client, "tracks_download_info"):
+            infos = client.tracks_download_info(track_id)
+    if not infos:
+        fail("no Yandex download info for track")
+    return max(
+        infos,
+        key=lambda info: int(first_attr(info, "bitrate_in_kbps", "bitrate") or 0),
+    )
+
+
+def direct_link(info: Any) -> str:
+    getter = getattr(info, "get_direct_link", None)
+    if callable(getter):
+        return getter()
+    link = first_attr(info, "direct_link", "directLink", "url")
+    if not link:
+        fail("download info did not provide a direct link")
+    return str(link)
+
+
+def cmd_download(payload: dict[str, Any]) -> None:
+    client = client_from_payload(payload)
+    track_id = payload.get("trackId") or payload.get("track_id")
+    if not track_id:
+        fail("trackId is required")
+    tracks = client.tracks([track_id])
+    if not tracks:
+        fail(f"Yandex track {track_id} not found")
+    info = best_download_info(tracks[0])
+    print(
+        json.dumps(
+            {
+                "url": direct_link(info),
+                "codec": first_attr(info, "codec"),
+                "bitrateKbps": first_attr(info, "bitrate_in_kbps", "bitrate"),
+            },
+            ensure_ascii=False,
+        )
+    )
+
+
+def cmd_login() -> None:
+    client = Client(request=Request(timeout=(10, 30)))
+    print("Requesting Yandex device login code...", file=sys.stderr, flush=True)
+    if not hasattr(client, "request_device_code") or not hasattr(
+        client, "poll_device_token"
+    ):
+        fail("Installed yandex_music.Client does not expose device-code OAuth helpers")
+
+    code = client.request_device_code(device_name="Songarr")
+    url = first_attr(code, "verification_url", "verificationUrl")
+    user_code = first_attr(code, "user_code", "userCode")
+    interval = float(first_attr(code, "interval") or 5)
+    expires_in = float(first_attr(code, "expires_in", "expiresIn") or 300)
+    deadline = time.monotonic() + expires_in
+
+    print("", file=sys.stderr, flush=True)
+    print(f"Open this URL: {url}", file=sys.stderr, flush=True)
+    print(f"Enter this code: {user_code}", file=sys.stderr, flush=True)
+    print("", file=sys.stderr, flush=True)
+    print("Waiting for confirmation...", file=sys.stderr, flush=True)
+
+    token = None
+    while time.monotonic() < deadline:
+        token = client.poll_device_token(first_attr(code, "device_code", "deviceCode"))
+        if token is not None:
+            break
+        time.sleep(interval)
+    if token is None:
+        fail("Timed out waiting for Yandex login confirmation")
+
+    print(
+        json.dumps(
+            {
+                "accessToken": first_attr(token, "access_token", "accessToken"),
+                "refreshToken": first_attr(token, "refresh_token", "refreshToken"),
+                "expiresIn": first_attr(token, "expires_in", "expiresIn"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
+
+
+COMMANDS = {
+    "login": lambda payload: cmd_login(),
+    "search": cmd_search,
+    "wave": cmd_wave,
+    "download": cmd_download,
+}
+
+
+def main() -> None:
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    handler = COMMANDS.get(command)
+    if not handler:
+        fail("usage: songarr-yandex <login|search|wave|download>")
+    try:
+        payload = {} if command == "login" else read_payload()
+        handler(payload)
+    except SystemExit:
+        raise
+    except Exception as exc:
+        fail(f"{type(exc).__name__}: {exc}")
+
+
+if __name__ == "__main__":
+    main()

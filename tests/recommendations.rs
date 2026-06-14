@@ -27,6 +27,40 @@ fn fixture_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/harness/data/fixtures/source.webm")
 }
 
+fn mock_yandex_helper() -> String {
+    let dir = std::env::temp_dir().join(format!("songarr-yandex-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("songarr-yandex");
+    std::fs::write(
+        &path,
+        r#"#!/usr/bin/env python3
+import json, sys
+cmd = sys.argv[1]
+payload = json.loads(sys.stdin.read() or "{}")
+tracks = [
+  {"trackId": "ya-wave-1", "artist": "Yandex Artist", "title": "Yandex Wave", "album": "Yandex Album", "durationMs": 177000, "artworkUrl": "https://img.example/ya1.jpg"},
+  {"trackId": "ya-wave-2", "artist": "Yandex Artist", "title": "Second Wave", "album": "Yandex Album", "durationMs": 188000, "artworkUrl": "https://img.example/ya2.jpg"}
+]
+if cmd in ("wave", "search"):
+    print(json.dumps(tracks[: int(payload.get("limit", 20))]))
+elif cmd == "download":
+    print(json.dumps({"url": "http://127.0.0.1:9/yandex-audio.ogg", "codec": "mp3", "bitrateKbps": 192}))
+else:
+    print("unsupported", file=sys.stderr)
+    sys.exit(2)
+"#,
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).unwrap();
+    }
+    path.to_string_lossy().into_owned()
+}
+
 async fn spawn_r1_proxy(upstream: &str, ytm_base: String) -> TestProxy {
     spawn_rec_proxy(upstream, ytm_base, |_| {}).await
 }
@@ -891,6 +925,57 @@ async fn wave_next_uses_feedback_seed_and_records_play_feedback() {
     .await
     .unwrap();
     assert_eq!(feedback_count, 2);
+}
+
+#[tokio::test]
+async fn yandex_wave_feeds_wave_next() {
+    let _guard = serial();
+    let upstream = spawn_mock_navidrome().await;
+    let helper = mock_yandex_helper();
+    let proxy = spawn_rec_proxy(&upstream, "http://127.0.0.1:9".into(), move |config| {
+        config.recommendations.weight_ytm = 0.0;
+        config.recommendations.weight_deezer = 0.0;
+        config.recommendations.weight_lastfm = 0.0;
+        config.recommendations.weight_yandex = 1.2;
+        config.yandex.enabled = true;
+        config.yandex.access_token = "test-token".into();
+        config.yandex.helper_path = helper;
+    })
+    .await;
+
+    let client = reqwest::Client::new();
+    let body: serde_json::Value = client
+        .get(format!(
+            "{}/wave/api/next?{}&count=2",
+            proxy.url,
+            auth_query(Some("json"))
+        ))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let tracks = body["tracks"].as_array().unwrap();
+    assert!(
+        tracks.iter().any(|track| track["title"] == "Yandex Wave"
+            && track["id"].as_str().unwrap_or("").starts_with("sgr_")),
+        "Yandex Wave should feed /wave/api/next: {body}"
+    );
+
+    let yandex_id = tracks
+        .iter()
+        .find(|track| track["title"] == "Yandex Wave")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let pool = proxy.db().await;
+    let provider: (String,) = sqlx::query_as("SELECT provider FROM virtual_tracks WHERE id = ?")
+        .bind(yandex_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(provider.0, "yandex");
 }
 
 #[tokio::test]

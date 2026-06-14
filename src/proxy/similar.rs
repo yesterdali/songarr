@@ -299,6 +299,27 @@ pub(crate) async fn recommended_for_seed(
         }
     }
 
+    if cfg.weight_yandex > 0.0 && crate::yandex::available(&state.config.yandex) {
+        match cached_source(state, "yandex_seed", &seed_key, || async {
+            crate::recs::yandex::search_as_recs(
+                &state.config.yandex,
+                &seed.artist,
+                &seed.title,
+                fetch_limit,
+            )
+            .await
+        })
+        .await
+        {
+            Ok(candidates) => sources.push(SourceCandidates {
+                source: "yandex",
+                weight: cfg.weight_yandex,
+                candidates,
+            }),
+            Err(error) => tracing::debug!(%error, "Yandex recommendation source abstained"),
+        }
+    }
+
     let candidates = crate::recs::merge::merge_sources(sources, fetch_limit);
     upsert_candidates(state, username, candidates, count, existing).await
 }
@@ -382,11 +403,26 @@ pub(crate) async fn recommended_for_artist(
         }
     }
 
+    if cfg.weight_yandex > 0.0 && crate::yandex::available(&state.config.yandex) {
+        match cached_source(state, "yandex_artist", &seed_key, || async {
+            crate::recs::yandex::search_as_recs(&state.config.yandex, artist, "", fetch_limit).await
+        })
+        .await
+        {
+            Ok(candidates) => sources.push(SourceCandidates {
+                source: "yandex",
+                weight: cfg.weight_yandex,
+                candidates,
+            }),
+            Err(error) => tracing::debug!(%error, artist, "Yandex topSongs source abstained"),
+        }
+    }
+
     let candidates = crate::recs::merge::merge_sources(sources, fetch_limit);
     upsert_candidates(state, username, candidates, count, existing).await
 }
 
-async fn upsert_candidates(
+pub(crate) async fn upsert_candidates(
     state: &AppState,
     username: &str,
     candidates: Vec<RecCandidate>,
@@ -427,6 +463,7 @@ async fn upsert_candidates(
 
         let provider = match candidate.provider.as_deref() {
             Some("deezer") => "deezer",
+            Some(crate::yandex::PROVIDER) => crate::yandex::PROVIDER,
             _ => YTM_PROVIDER,
         };
         let provider_track_id = candidate

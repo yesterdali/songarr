@@ -8,6 +8,7 @@
 pub mod deezer;
 pub mod lastfm;
 pub mod merge;
+pub mod yandex;
 pub mod ytm;
 
 use sqlx::SqlitePool;

@@ -21,6 +21,9 @@ pending).
 - Playing a virtual track resolves the best YouTube source (yt-dlp + scoring),
   live-transcodes to opus for your client, and tees the original-quality
   source into a staging area.
+- Optional Yandex Music integration can feed Wave/search from your Yandex
+  account. Yandex-origin tracks try Yandex audio first, then fall back to the
+  normal YouTube resolver if the unofficial API cannot provide a source.
 - A background worker remuxes (never lossy→lossy), tags, moves the file into
   `/music/_songarr/Artist/…`, triggers a Navidrome scan, remaps the virtual id
   to the real one, and replays any scrobbles/stars you made meanwhile.
@@ -93,3 +96,16 @@ See `docker/docker-compose.example.yml` — Navidrome + the proxy + gluetun
 (VPN egress for yt-dlp via `ytdlp_proxy = "http://gluetun:8888"`). Copy
 `config.example.toml` to your config volume as `songarr.toml`. Clients point
 at port **4534** instead of Navidrome.
+
+### Yandex Music
+
+Yandex support uses the unofficial Python `yandex-music-api` helper packaged
+in the Docker image. Generate a token on the host/container:
+
+```sh
+songarr-proxy yandex login
+```
+
+Then set `[yandex].enabled = true` and provide the token through
+`SONGARR_YANDEX_ACCESS_TOKEN` (preferred) or `songarr.toml`. Tokens stay
+server-side; the Wave PWA never receives them.

@@ -32,6 +32,13 @@ services:
       - ./data/songarr:/config       # songarr.toml + songarr.db live here
       - ./data/music:/music          # MUST be the same library Navidrome scans
       - ./data/staging:/staging
+    # Optional Yandex Music integration. Generate a token with:
+    #   docker compose run --rm songarr-proxy yandex login
+    # Then inject it with your secret manager or .env file.
+    environment:
+      SONGARR_YANDEX_ENABLED: "${SONGARR_YANDEX_ENABLED:-false}"
+      SONGARR_YANDEX_ACCESS_TOKEN: "${SONGARR_YANDEX_ACCESS_TOKEN:-}"
+      SONGARR_YANDEX_REFRESH_TOKEN: "${SONGARR_YANDEX_REFRESH_TOKEN:-}"
 
   gluetun:
     image: qmcgaw/gluetun:latest

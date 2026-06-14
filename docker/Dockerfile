@@ -27,7 +27,8 @@ FROM debian:bookworm-slim
 
 # yt-dlp's release binary is a python3 zipapp; ffmpeg/ffprobe from the distro.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl python3 ffmpeg \
+    && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-pip ffmpeg \
+    && pip3 install --no-cache-dir --break-system-packages yandex-music \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
          -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
@@ -36,6 +37,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /build/target/release/songarr-proxy /usr/local/bin/songarr-proxy
+COPY scripts/songarr-yandex /usr/local/bin/songarr-yandex
+RUN chmod a+rx /usr/local/bin/songarr-yandex
 
 ENV SONGARR_CONFIG=/config/songarr.toml
 VOLUME ["/config", "/music", "/staging"]

@@ -15,8 +15,10 @@ use axum::body::Body;
 use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::Response;
+use futures_util::TryStreamExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
+use tokio_util::io::StreamReader;
 
 use crate::config::StreamFormat;
 use crate::subsonic::{auth, error_not_found, Format};
@@ -135,8 +137,8 @@ async fn start_pipeline(
     let streaming = &state.config.streaming;
     let job_id = jobs::create(&state.db, &track.id, &username).await?;
 
-    let resolution = match crate::resolve::resolve_cached(&state, &track).await {
-        Ok(resolution) => resolution,
+    let source = match stream_source(&state, streaming, &track).await {
+        Ok(source) => source,
         Err(error) => {
             jobs::set_status(&state.db, &job_id, "failed", Some(&error.to_string())).await?;
             vtrack::set_status(&state.db, &track.id, "failed", Some(&error.to_string())).await?;
@@ -145,12 +147,13 @@ async fn start_pipeline(
     };
     tracing::info!(
         track = %format!("{} — {}", track.artist, track.title),
-        url = %resolution.url,
-        score = resolution.score,
-        candidate = %resolution.candidate_title,
+        provider = %source.provider,
+        url = %source.url,
+        score = source.score,
+        candidate = %source.candidate_title,
         "resolved virtual stream source"
     );
-    jobs::set_resolution(&state.db, &job_id, &resolution.url, resolution.score).await?;
+    jobs::set_resolution(&state.db, &job_id, &source.url, source.score).await?;
     vtrack::set_status(&state.db, &track.id, "streaming", None).await?;
 
     tokio::fs::create_dir_all(&state.config.library.staging_dir).await?;
@@ -161,26 +164,8 @@ async fn start_pipeline(
         .join(format!("{job_id}.src"));
     jobs::set_staging_path(&state.db, &job_id, &staging_path.to_string_lossy()).await?;
 
-    // Source of original-quality bytes: innertube direct HTTP when enabled
-    // and working (~1s to audio), else the yt-dlp pipe (~1.5s with the
-    // manifest-skip flags). Direct-fetch failure must degrade speed, never
-    // availability.
-    let (mut source_reader, mut ytdlp) = if streaming.innertube {
-        match direct_source(&state, &resolution.url).await {
-            Ok(reader) => {
-                tracing::info!(url = %resolution.url, "using innertube direct source");
-                (reader, None)
-            }
-            Err(error) => {
-                tracing::info!(%error, "innertube fast path unavailable; using yt-dlp");
-                let (reader, child) = spawn_ytdlp_source(streaming, &resolution.url)?;
-                (reader, Some(child))
-            }
-        }
-    } else {
-        let (reader, child) = spawn_ytdlp_source(streaming, &resolution.url)?;
-        (reader, Some(child))
-    };
+    let mut source_reader = source.reader;
+    let mut ytdlp = source.ytdlp;
 
     // ffmpeg: transcode for the live pipe.
     let (codec_args, content_type): (&[&str], &str) = match streaming.format {
@@ -341,6 +326,90 @@ async fn start_pipeline(
 }
 
 type SourceReader = Box<dyn tokio::io::AsyncRead + Send + Unpin>;
+
+struct StreamSource {
+    provider: &'static str,
+    url: String,
+    score: i64,
+    candidate_title: String,
+    reader: SourceReader,
+    ytdlp: Option<tokio::process::Child>,
+}
+
+async fn stream_source(
+    state: &AppState,
+    streaming: &crate::config::Streaming,
+    track: &VirtualTrack,
+) -> anyhow::Result<StreamSource> {
+    if track.provider == crate::yandex::PROVIDER
+        && state.config.yandex.enabled
+        && state.config.yandex.use_for_import
+    {
+        match yandex_source(state, track).await {
+            Ok(source) => return Ok(source),
+            Err(error) => {
+                tracing::info!(%error, track = track.id, "Yandex direct source unavailable; falling back to YouTube");
+            }
+        }
+    }
+
+    let resolution = crate::resolve::resolve_cached(state, track).await?;
+
+    // Source of original-quality bytes: innertube direct HTTP when enabled
+    // and working (~1s to audio), else the yt-dlp pipe (~1.5s with the
+    // manifest-skip flags). Direct-fetch failure must degrade speed, never
+    // availability.
+    let (reader, ytdlp) = if streaming.innertube {
+        match direct_source(state, &resolution.url).await {
+            Ok(reader) => {
+                tracing::info!(url = %resolution.url, "using innertube direct source");
+                (reader, None)
+            }
+            Err(error) => {
+                tracing::info!(%error, "innertube fast path unavailable; using yt-dlp");
+                let (reader, child) = spawn_ytdlp_source(streaming, &resolution.url)?;
+                (reader, Some(child))
+            }
+        }
+    } else {
+        let (reader, child) = spawn_ytdlp_source(streaming, &resolution.url)?;
+        (reader, Some(child))
+    };
+    Ok(StreamSource {
+        provider: "youtube",
+        url: resolution.url,
+        score: resolution.score,
+        candidate_title: resolution.candidate_title,
+        reader,
+        ytdlp,
+    })
+}
+
+async fn yandex_source(state: &AppState, track: &VirtualTrack) -> anyhow::Result<StreamSource> {
+    let download = crate::yandex::download(&state.config.yandex, &track.provider_track_id).await?;
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .build()?;
+    let response = client
+        .get(&download.url)
+        .timeout(Duration::from_secs(
+            state.config.streaming.timeout_first_byte_secs + 30,
+        ))
+        .send()
+        .await?
+        .error_for_status()?;
+    let stream = response
+        .bytes_stream()
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::Other, error));
+    Ok(StreamSource {
+        provider: crate::yandex::PROVIDER,
+        url: download.url,
+        score: 100,
+        candidate_title: track.title.clone(),
+        reader: Box::new(StreamReader::new(stream)),
+        ytdlp: None,
+    })
+}
 
 /// Direct innertube source: resolve the media URL and open the HTTP stream.
 async fn direct_source(state: &AppState, watch_url: &str) -> anyhow::Result<SourceReader> {
