@@ -70,18 +70,20 @@ function SectionTitle({ children }: { children: ReactNode }) {
 function ScreenHeader({ title }: { title: string }) {
   const nav = useNav();
   return (
-    <header className="mb-5 flex items-center gap-3">
+    <header className="mb-5 flex items-center gap-3 md:mb-7">
       {nav.canGoBack && (
         <button
           type="button"
           aria-label="back"
           onClick={nav.back}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-black/5 bg-white/70 text-neutral-600 backdrop-blur transition active:scale-90 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full border border-black/5 bg-white/70 text-neutral-600 backdrop-blur transition active:scale-90 dark:border-white/10 dark:bg-white/5 dark:text-neutral-300 md:h-11 md:w-11"
         >
-          <ChevronLeftIcon className="h-5 w-5" />
+          <ChevronLeftIcon className="h-5 w-5 md:h-6 md:w-6" />
         </button>
       )}
-      <h1 className="truncate text-2xl font-extrabold tracking-tight">{title}</h1>
+      <h1 className="truncate text-2xl font-extrabold tracking-tight md:text-4xl">
+        {title}
+      </h1>
     </header>
   );
 }
@@ -184,17 +186,17 @@ export function HomeView() {
         type="button"
         onClick={playWave}
         disabled={waveBusy}
-        className="wave-hero group relative mb-7 aspect-[16/10] w-full overflow-hidden rounded-xl text-left shadow-xl shadow-wave-pink/25 transition-transform active:scale-[0.98]"
+        className="wave-hero group relative mb-7 aspect-[16/10] w-full overflow-hidden rounded-xl text-left shadow-xl shadow-wave-pink/25 transition-transform active:scale-[0.98] md:aspect-[21/8]"
       >
         <GothicCrossIcon className="absolute inset-0 m-auto h-[78%] w-auto text-black/25 transition-transform duration-700 group-active:scale-105" />
         <span className="absolute right-5 top-5 grid h-14 w-14 place-items-center rounded-full border border-wave-pink/40 bg-black/60 text-[#e9e2d4] shadow-lg backdrop-blur transition group-active:scale-90">
           <PlayIcon className="ml-0.5 h-7 w-7" />
         </span>
         <span className="absolute inset-x-5 bottom-5 block">
-          <span className="font-display block text-4xl font-bold tracking-tight text-[#f3ecdd] drop-shadow-md">
+          <span className="font-display block text-4xl font-bold tracking-tight text-[#f3ecdd] drop-shadow-md md:text-6xl">
             Твоя волна
           </span>
-          <span className="mt-1 block max-w-[80%] text-sm font-medium text-white/85">
+          <span className="mt-1 block max-w-[80%] text-sm font-medium text-white/85 md:max-w-md md:text-base">
             {waveBusy ? "Запускаю…" : "бесконечный поток музыки, подобранной для тебя"}
           </span>
         </span>
@@ -218,9 +220,9 @@ export function HomeView() {
             </button>
           </div>
           <Status loading={liked.loading} error={liked.error} />
-          <div className="scrollbar-none -mx-5 flex snap-x snap-mandatory gap-6 overflow-x-auto scroll-pl-5 px-5">
+          <div className="scrollbar-none -mx-5 flex snap-x snap-mandatory gap-6 overflow-x-auto scroll-pl-5 px-5 md:mx-0 md:grid md:grid-cols-2 md:gap-x-8 md:gap-y-1 md:overflow-visible md:px-0">
             {likedPages.map((page, pageIndex) => (
-              <div key={pageIndex} className="w-[85%] shrink-0 snap-start">
+              <div key={pageIndex} className="w-[85%] shrink-0 snap-start md:w-full">
                 {page.map((song, i) => (
                   <SongRow
                     key={song.id}
@@ -247,9 +249,9 @@ export function HomeView() {
           </button>
         </div>
         <Status loading={recent.loading} error={recent.error} />
-        <div className="scrollbar-none -mx-5 flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-pl-5 px-5 pb-2">
+        <div className="scrollbar-none -mx-5 flex snap-x snap-mandatory gap-3 overflow-x-auto scroll-pl-5 px-5 pb-2 md:mx-0 md:grid md:grid-cols-4 md:gap-5 md:overflow-visible md:px-0 lg:grid-cols-5">
           {recent.data?.map((album) => (
-            <AlbumCard key={album.id} album={album} />
+            <AlbumCard key={album.id} album={album} className="w-32 shrink-0 md:w-full" />
           ))}
         </div>
       </section>
@@ -303,9 +305,9 @@ export function SearchView() {
       {results.data?.albums.length ? (
         <section className="mb-6">
           <SectionTitle>Альбомы</SectionTitle>
-          <div className="scrollbar-none -mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-2">
+          <div className="scrollbar-none -mx-5 flex snap-x gap-3 overflow-x-auto px-5 pb-2 md:mx-0 md:grid md:grid-cols-4 md:gap-5 md:overflow-visible md:px-0">
             {results.data.albums.map((album) => (
-              <AlbumCard key={album.id} album={album} />
+              <AlbumCard key={album.id} album={album} className="w-32 shrink-0 md:w-full" />
             ))}
           </div>
         </section>
@@ -356,7 +358,7 @@ export function LibraryView() {
   return (
     <div className="animate-fade-in">
       <ScreenHeader title="Библиотека" />
-      <div className="mb-6 grid grid-cols-2 gap-3">
+      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-3">
         {LIBRARY_TILES.map(({ label, icon: Icon, accent }, i) => (
           <button
             key={label}
@@ -371,9 +373,11 @@ export function LibraryView() {
       </div>
       <SectionTitle>Артисты</SectionTitle>
       <Status loading={artists.loading} error={artists.error} />
-      {artists.data?.map((artist: Artist) => (
-        <ArtistRow key={artist.id} artist={artist} />
-      ))}
+      <div className="md:grid md:grid-cols-2 md:gap-x-6 xl:grid-cols-3">
+        {artists.data?.map((artist: Artist) => (
+          <ArtistRow key={artist.id} artist={artist} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -413,7 +417,7 @@ export function AlbumsView() {
         ))}
       </div>
       <Status loading={albums.loading} error={albums.error} />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-5 lg:grid-cols-5">
         {albums.data?.map((album) => (
           <AlbumCard key={album.id} album={album} className="w-full" />
         ))}
@@ -429,7 +433,7 @@ export function ArtistView({ id, title }: { id: string; title: string }) {
     <div className="animate-fade-in">
       <ScreenHeader title={data.data?.artist.name ?? title} />
       <Status loading={data.loading} error={data.error} />
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-5 lg:grid-cols-5">
         {data.data?.albums.map((album: Album) => (
           <AlbumCard key={album.id} album={album} className="w-full" />
         ))}
@@ -465,7 +469,7 @@ export function ArtistLookupView({ title }: { title: string }) {
           {result.data.albums.length > 0 && (
             <section className="mb-6">
               <SectionTitle>Альбомы</SectionTitle>
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-5">
                 {result.data.albums.map((album) => (
                   <AlbumCard key={album.id} album={album} className="w-full" />
                 ))}
@@ -510,12 +514,12 @@ export function AlbumView({ id, title }: { id: string; title: string }) {
       <Status loading={data.loading} error={data.error} />
       {data.data && (
         <>
-          <div className="mb-6 flex items-end gap-4">
+          <div className="mb-6 flex items-end gap-4 md:items-center md:gap-6">
             <Cover
               coverArt={data.data.album.coverArt}
               size={300}
               rounded="rounded-lg"
-              className="h-28 w-28 shrink-0 shadow-xl shadow-black/20 ring-1 ring-black/5 dark:ring-white/10"
+              className="h-28 w-28 shrink-0 shadow-xl shadow-black/20 ring-1 ring-black/5 dark:ring-white/10 md:h-44 md:w-44"
             />
             <div className="min-w-0 flex-1">
               <button
@@ -539,9 +543,11 @@ export function AlbumView({ id, title }: { id: string; title: string }) {
               <PlayAllButton songs={songs} />
             </div>
           </div>
-          {songs.map((song, position) => (
-            <SongRow key={song.id} song={song} songs={songs} position={position} />
-          ))}
+          <div className="md:max-w-3xl">
+            {songs.map((song, position) => (
+              <SongRow key={song.id} song={song} songs={songs} position={position} />
+            ))}
+          </div>
         </>
       )}
     </div>
@@ -556,29 +562,31 @@ export function PlaylistsView() {
     <div className="animate-fade-in">
       <ScreenHeader title="Плейлисты" />
       <Status loading={data.loading} error={data.error} />
-      {data.data?.map((playlist: Playlist) => (
-        <button
-          key={playlist.id}
-          type="button"
-          onClick={() =>
-            nav.push({ name: "playlist", id: playlist.id, title: playlist.name })
-          }
-          className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-black/[0.04] active:bg-black/[0.06] dark:hover:bg-white/[0.04] dark:active:bg-white/[0.07]"
-        >
-          <Cover
-            coverArt={playlist.coverArt}
-            size={120}
-            className="h-12 w-12 shrink-0 shadow-md ring-1 ring-black/5 dark:ring-white/10"
-          />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-sm font-semibold">{playlist.name}</span>
-            <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
-              {playlist.songCount ?? 0} треков
+      <div className="md:grid md:grid-cols-2 md:gap-x-6 xl:grid-cols-3">
+        {data.data?.map((playlist: Playlist) => (
+          <button
+            key={playlist.id}
+            type="button"
+            onClick={() =>
+              nav.push({ name: "playlist", id: playlist.id, title: playlist.name })
+            }
+            className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors hover:bg-black/[0.04] active:bg-black/[0.06] dark:hover:bg-white/[0.04] dark:active:bg-white/[0.07]"
+          >
+            <Cover
+              coverArt={playlist.coverArt}
+              size={120}
+              className="h-12 w-12 shrink-0 shadow-md ring-1 ring-black/5 dark:ring-white/10"
+            />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-semibold">{playlist.name}</span>
+              <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+                {playlist.songCount ?? 0} треков
+              </span>
             </span>
-          </span>
-          <ChevronLeftIcon className="h-4 w-4 rotate-180 text-neutral-400 dark:text-neutral-600" />
-        </button>
-      ))}
+            <ChevronLeftIcon className="h-4 w-4 rotate-180 text-neutral-400 dark:text-neutral-600" />
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -628,7 +636,7 @@ export function LikedView() {
       {albums.length > 0 && (
         <section className="mb-6">
           <SectionTitle>Альбомы</SectionTitle>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 md:gap-5 lg:grid-cols-5">
             {albums.map((album) => (
               <AlbumCard key={album.id} album={album} className="w-full" />
             ))}
@@ -638,9 +646,11 @@ export function LikedView() {
       {artists.length > 0 && (
         <section className="mb-6">
           <SectionTitle>Артисты</SectionTitle>
-          {artists.map((artist) => (
-            <ArtistRow key={artist.id} artist={artist} />
-          ))}
+          <div className="md:grid md:grid-cols-2 md:gap-x-6 xl:grid-cols-3">
+            {artists.map((artist) => (
+              <ArtistRow key={artist.id} artist={artist} />
+            ))}
+          </div>
         </section>
       )}
       {songs.length > 0 && (

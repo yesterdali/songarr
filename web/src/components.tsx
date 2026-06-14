@@ -204,7 +204,7 @@ function QueueScreen({ onClose }: { onClose: () => void }) {
   const upNext = queue.slice(index + 1);
   return (
     <div className="absolute inset-0 z-10 animate-fade-in bg-black/55 backdrop-blur-2xl">
-      <div className="mx-auto flex h-full w-full max-w-md animate-slide-up flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)]">
+      <div className="mx-auto flex h-full w-full max-w-md animate-slide-up flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)] md:max-w-3xl">
         <header className="mb-5 flex items-center">
           <button
             type="button"
@@ -292,7 +292,7 @@ function LyricsScreen({
         <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/60 to-black/85" />
       </div>
 
-      <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)]">
+      <div className="relative mx-auto flex h-full w-full max-w-md flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)] md:max-w-3xl">
         <header className="mb-5 flex items-center">
           <button
             type="button"
@@ -447,7 +447,7 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
         <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/45 to-black/75" />
       </div>
 
-      <div className="relative mx-auto flex h-full w-full max-w-md animate-slide-up flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)]">
+      <div className="relative mx-auto flex h-full w-full max-w-md animate-slide-up flex-col px-6 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),1.25rem)] md:max-w-5xl md:px-8 lg:px-10">
         <header className="mb-5 flex items-center">
           <button
             type="button"
@@ -475,7 +475,7 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           size={600}
           placeholderSize={80}
           rounded="rounded-xl"
-          className="mx-auto aspect-square w-full max-w-xs shadow-[0_24px_60px_-12px_rgb(0_0_0/0.7)] ring-1 ring-white/10"
+          className="mx-auto aspect-square w-full max-w-xs shadow-[0_24px_60px_-12px_rgb(0_0_0/0.7)] ring-1 ring-white/10 md:max-w-sm lg:max-w-md"
         />
 
         <div className="mt-7 flex items-center gap-3">
