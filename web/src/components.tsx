@@ -122,6 +122,11 @@ export function SongRow({
             {song.title}
           </span>
           <span className="block truncate text-xs text-neutral-500 dark:text-neutral-400">
+            {song.provider === "yandex" ? (
+              <span className="mr-1 rounded-full bg-wave-pink/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-wave-pink">
+                Yandex
+              </span>
+            ) : null}
             {song.artist}
           </span>
         </span>
@@ -151,7 +156,7 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
     <div className="relative border-b border-black/5 dark:border-white/5">
       <div className="absolute inset-x-4 top-0 h-0.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
         <div
-          className="h-full rounded-full bg-gradient-to-r from-wave-orange to-wave-pink"
+          className="h-full rounded-full bg-gradient-to-r from-wave-orange to-wave-pink transition-[width] duration-500 ease-out"
           style={{ width: `${progress}%` }}
         />
       </div>
@@ -241,7 +246,14 @@ function QueueScreen({ onClose }: { onClose: () => void }) {
                 />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold">{song.title}</span>
-                  <span className="block truncate text-xs text-white/50">{song.artist}</span>
+                  <span className="block truncate text-xs text-white/50">
+                    {song.provider === "yandex" ? (
+                      <span className="mr-1 rounded-full bg-wave-pink/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-wave-pink">
+                        Yandex
+                      </span>
+                    ) : null}
+                    {song.artist}
+                  </span>
                 </span>
               </button>
             ))}
@@ -488,6 +500,11 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
               onClick={openArtist}
               className="block max-w-full truncate text-left font-medium text-white/70 active:text-wave-pink"
             >
+              {current.provider === "yandex" ? (
+                <span className="mr-2 rounded-full bg-wave-pink/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-wave-pink">
+                  Yandex
+                </span>
+              ) : null}
               {current.artist}
             </button>
             {current.album && (
@@ -528,7 +545,7 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
             max={displayDuration}
             value={displayDuration ? displayTime : 0}
             onChange={(event) => seek(Number(event.target.value))}
-            className="slider w-full"
+            className="slider smooth-slider w-full"
             style={{ "--p": `${progress}%` } as CSSProperties}
           />
           <div className="flex justify-between text-xs font-medium text-white/50">

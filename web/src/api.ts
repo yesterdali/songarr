@@ -99,6 +99,7 @@ type RawSong = {
   coverArt?: string;
   streamUrl?: string;
   starred?: string;
+  provider?: string;
 };
 
 function toSong(raw: RawSong): Song {
@@ -113,6 +114,7 @@ function toSong(raw: RawSong): Song {
     coverArt: raw.coverArt ?? raw.id,
     streamUrl: raw.streamUrl,
     starred: Boolean(raw.starred),
+    provider: raw.provider,
   };
 }
 

@@ -281,13 +281,13 @@ export function SearchView() {
     <div className="animate-fade-in">
       <ScreenHeader title="Поиск" />
       <div className="relative mb-5">
-        <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-neutral-400" />
+        <SearchIcon className="pointer-events-none absolute left-4 top-1/2 z-10 h-5 w-5 -translate-y-1/2 text-neutral-400" />
         <input
           autoFocus
           value={text}
           onChange={(event) => setText(event.target.value)}
           placeholder="Песни, артисты, альбомы"
-          className="w-full rounded-lg border border-black/5 bg-white/80 py-3 pl-11 pr-4 text-base shadow-sm outline-none backdrop-blur transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
+          className="relative w-full rounded-lg border border-black/5 bg-white/80 py-3 pl-11 pr-4 text-base shadow-sm outline-none backdrop-blur transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
         />
       </div>
 

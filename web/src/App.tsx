@@ -268,7 +268,7 @@ function DesktopNowPlayingRail({ onOpen }: { onOpen: () => void }) {
         <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.035] p-4">
           <div className="h-1 overflow-hidden rounded-full bg-white/10">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-wave-orange to-wave-pink"
+              className="h-full rounded-full bg-gradient-to-r from-wave-orange to-wave-pink transition-[width] duration-500 ease-out"
               style={{ width: `${progress}%` }}
             />
           </div>

@@ -141,6 +141,9 @@ input[type="range"].slider::-webkit-slider-runnable-track {
     rgb(233 226 212 / 0.16) var(--p, 0%)
   );
 }
+input[type="range"].slider.smooth-slider::-webkit-slider-runnable-track {
+  transition: background 420ms ease-out;
+}
 input[type="range"].slider::-webkit-slider-thumb {
   -webkit-appearance: none;
   width: 12px;
@@ -151,6 +154,9 @@ input[type="range"].slider::-webkit-slider-thumb {
   background: #e9e2d4;
   box-shadow: 0 0 8px rgb(196 30 58 / 0.7);
 }
+input[type="range"].slider.smooth-slider::-webkit-slider-thumb {
+  transition: transform 160ms ease-out, box-shadow 160ms ease-out;
+}
 input[type="range"].slider::-moz-range-track {
   height: 4px;
   background: rgb(233 226 212 / 0.16);
@@ -158,6 +164,9 @@ input[type="range"].slider::-moz-range-track {
 input[type="range"].slider::-moz-range-progress {
   height: 4px;
   background: linear-gradient(to right, #7a0c1f, #c41e3a);
+}
+input[type="range"].slider.smooth-slider::-moz-range-progress {
+  transition: width 420ms ease-out;
 }
 input[type="range"].slider::-moz-range-thumb {
   width: 12px;
@@ -167,6 +176,9 @@ input[type="range"].slider::-moz-range-thumb {
   transform: rotate(45deg);
   background: #e9e2d4;
   box-shadow: 0 0 8px rgb(196 30 58 / 0.7);
+}
+input[type="range"].slider.smooth-slider::-moz-range-thumb {
+  transition: transform 160ms ease-out, box-shadow 160ms ease-out;
 }
 
 /* Tiny equalizer shown on the playing track */

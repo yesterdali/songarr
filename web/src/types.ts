@@ -11,6 +11,7 @@ export type Song = {
   coverArt?: string;
   streamUrl?: string;
   starred?: boolean;
+  provider?: string;
 };
 
 export type Album = {

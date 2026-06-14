@@ -19,6 +19,7 @@ pub struct Payload<'a> {
 #[derive(Debug, Clone)]
 pub struct SongEntry {
     pub id: String,
+    pub provider: Option<String>,
     pub title: String,
     pub artist: String,
     pub album: Option<String>,
@@ -43,6 +44,7 @@ impl SongEntry {
         let size = duration_secs.map(|d| d * i64::from(streaming.bitrate_kbps) * 125);
         Self {
             id: track.id.clone(),
+            provider: Some(track.provider.clone()),
             title: track.title.clone(),
             artist: track.artist.clone(),
             album: track.album.clone(),

@@ -4,6 +4,7 @@
 //! date in Python via `yandex-music-api`. Rust only depends on the stable JSON
 //! contract below, which tests can mock without real Yandex credentials.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
 
@@ -95,7 +96,7 @@ pub async fn wave(config: &YandexConfig, limit: usize) -> anyhow::Result<Vec<Yan
     if !available(config) || !config.use_for_wave {
         return Ok(Vec::new());
     }
-    run_helper(
+    run_helper_with_timeout(
         config,
         "wave",
         &WaveRequest {
@@ -103,6 +104,11 @@ pub async fn wave(config: &YandexConfig, limit: usize) -> anyhow::Result<Vec<Yan
             refresh_token: &config.refresh_token,
             limit,
         },
+        // Wave is an interactive "give me something now" path. Search and
+        // import use the configured timeout, but personalized Yandex radio can
+        // be slow or unavailable, so cap it and let other providers/fallbacks
+        // keep the queue alive.
+        Duration::from_secs(config.api_timeout_secs.clamp(1, 5)),
     )
     .await
 }
@@ -129,9 +135,26 @@ async fn run_helper<T: DeserializeOwned, P: Serialize>(
     command: &str,
     payload: &P,
 ) -> anyhow::Result<T> {
+    run_helper_with_timeout(
+        config,
+        command,
+        payload,
+        Duration::from_secs(config.api_timeout_secs.max(1)),
+    )
+    .await
+}
+
+async fn run_helper_with_timeout<T: DeserializeOwned, P: Serialize>(
+    config: &YandexConfig,
+    command: &str,
+    payload: &P,
+    timeout: Duration,
+) -> anyhow::Result<T> {
     let input = serde_json::to_vec(payload)?;
-    let mut child = tokio::process::Command::new(&config.helper_path)
-        .arg(command)
+    let (program, mut args) = helper_invocation(&config.helper_path);
+    args.push(command.into());
+    let mut child = tokio::process::Command::new(&program)
+        .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -143,7 +166,6 @@ async fn run_helper<T: DeserializeOwned, P: Serialize>(
         stdin.write_all(&input).await?;
     }
 
-    let timeout = Duration::from_secs(config.api_timeout_secs.max(1));
     let output = tokio::time::timeout(timeout, child.wait_with_output())
         .await
         .map_err(|_| anyhow::anyhow!("Yandex helper timed out after {}s", timeout.as_secs()))??;
@@ -154,6 +176,20 @@ async fn run_helper<T: DeserializeOwned, P: Serialize>(
     }
     serde_json::from_slice(&output.stdout)
         .map_err(|error| anyhow::anyhow!("invalid Yandex helper JSON: {error}"))
+}
+
+fn helper_invocation(helper_path: &str) -> (PathBuf, Vec<String>) {
+    let helper = PathBuf::from(helper_path);
+    let is_source_helper = helper.ends_with("scripts/songarr-yandex");
+    if !is_source_helper {
+        return (helper, Vec::new());
+    }
+    let python = std::env::var("VIRTUAL_ENV")
+        .map(|venv| PathBuf::from(venv).join("bin/python"))
+        .ok()
+        .filter(|path| path.exists())
+        .unwrap_or_else(|| PathBuf::from("python3"));
+    (python, vec![helper_path.to_string()])
 }
 
 #[cfg(test)]
@@ -186,5 +222,19 @@ mod tests {
             ..YandexConfig::default()
         };
         assert!(!available(&config));
+    }
+
+    #[test]
+    fn source_helper_runs_through_python() {
+        let (program, args) = helper_invocation("scripts/songarr-yandex");
+        assert!(program.ends_with("python") || program.ends_with("python3"));
+        assert_eq!(args, vec!["scripts/songarr-yandex".to_string()]);
+    }
+
+    #[test]
+    fn installed_helper_runs_directly() {
+        let (program, args) = helper_invocation("/usr/local/bin/songarr-yandex");
+        assert_eq!(program, PathBuf::from("/usr/local/bin/songarr-yandex"));
+        assert!(args.is_empty());
     }
 }

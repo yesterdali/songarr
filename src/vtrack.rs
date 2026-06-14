@@ -135,6 +135,23 @@ pub async fn imported(pool: &SqlitePool) -> sqlx::Result<Vec<VirtualTrack>> {
     .await
 }
 
+pub async fn random_by_provider(
+    pool: &SqlitePool,
+    provider: &str,
+    limit: usize,
+) -> sqlx::Result<Vec<VirtualTrack>> {
+    sqlx::query_as::<_, VirtualTrack>(&format!(
+        "SELECT {COLUMNS} FROM virtual_tracks
+         WHERE provider = ?
+         ORDER BY random()
+         LIMIT ?"
+    ))
+    .bind(provider)
+    .bind(limit as i64)
+    .fetch_all(pool)
+    .await
+}
+
 /// Persist a yt-dlp resolution so future plays skip the search round-trip.
 pub async fn set_resolution(
     pool: &SqlitePool,

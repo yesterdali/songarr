@@ -74,6 +74,7 @@ export function PlayerProvider({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const detachRef = useRef<(() => void) | null>(null);
+  const timingFrameRef = useRef<number | null>(null);
   const wavePrefetchRef = useRef<{ promise: Promise<Song[]>; at: number } | null>(null);
 
   const [queue, setQueue] = useState<Song[]>([]);
@@ -167,14 +168,38 @@ export function PlayerProvider({
   /** Make `audio` the active element: move listeners and state over to it. */
   const attach = useCallback((audio: HTMLAudioElement, fallbackDuration?: number) => {
     detachRef.current?.();
+    const stopSmoothTiming = () => {
+      if (timingFrameRef.current !== null) {
+        window.cancelAnimationFrame(timingFrameRef.current);
+        timingFrameRef.current = null;
+      }
+    };
     const syncTiming = () => {
       setCurrentTime(audio.currentTime);
       setDuration(audioDuration(audio, fallbackDuration));
     };
-    const syncPlayback = () => {
-      setIsPlaying(!audio.paused && !audio.ended);
+    const tickTiming = () => {
+      syncTiming();
+      if (!audio.paused && !audio.ended) {
+        timingFrameRef.current = window.requestAnimationFrame(tickTiming);
+      }
     };
-    const onEnded = () => advanceRef.current();
+    const startSmoothTiming = () => {
+      stopSmoothTiming();
+      if (!audio.paused && !audio.ended) {
+        timingFrameRef.current = window.requestAnimationFrame(tickTiming);
+      }
+    };
+    const syncPlayback = () => {
+      const playing = !audio.paused && !audio.ended;
+      setIsPlaying(playing);
+      if (playing) startSmoothTiming();
+      else stopSmoothTiming();
+    };
+    const onEnded = () => {
+      syncPlayback();
+      advanceRef.current();
+    };
     audio.addEventListener("timeupdate", syncTiming);
     audio.addEventListener("durationchange", syncTiming);
     audio.addEventListener("loadedmetadata", syncTiming);
@@ -188,6 +213,7 @@ export function PlayerProvider({
     audio.addEventListener("ended", onEnded);
     audioRef.current = audio;
     detachRef.current = () => {
+      stopSmoothTiming();
       audio.removeEventListener("timeupdate", syncTiming);
       audio.removeEventListener("durationchange", syncTiming);
       audio.removeEventListener("loadedmetadata", syncTiming);
@@ -297,7 +323,10 @@ export function PlayerProvider({
     if (queue.length - index > 3) return;
     extendingRef.current = true;
     getWaveNext(session, { seedId: current.id, count: 12 })
-      .then((songs) => {
+      .then(async (songs) => {
+        if (songs.length === 0) {
+          songs = await getWaveNext(session, { count: 12 }).catch(() => [] as Song[]);
+        }
         if (songs.length === 0) return;
         setQueue((existing) => {
           const seen = new Set(existing.map((song) => song.id));

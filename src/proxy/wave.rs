@@ -25,9 +25,10 @@ struct WaveAssets;
 
 const DEFAULT_NEXT_COUNT: usize = 12;
 const MAX_NEXT_COUNT: usize = 30;
-const SEED_EXTENSION_TIMEOUT_SECS: u64 = 4;
+const SEED_EXTENSION_TIMEOUT_SECS: u64 = 2;
 const FEEDBACK_SKIP_COOLDOWN_DAYS: i64 = 14;
 const FEEDBACK_DISLIKE_COOLDOWN_DAYS: i64 = 365;
+const MAX_RANDOM_FALLBACK_COUNT: usize = 90;
 
 pub async fn index() -> Response {
     asset_response("index.html", true)
@@ -201,6 +202,7 @@ struct WaveTrack {
     id: String,
     title: String,
     artist: String,
+    provider: Option<String>,
     artist_id: Option<String>,
     album: Option<String>,
     album_id: Option<String>,
@@ -328,36 +330,146 @@ async fn next_tracks(
         .await;
     }
 
+    if tracks.len() < count && crate::yandex::available(&state.config.yandex) {
+        let remaining = count - tracks.len();
+        let cached_target = remaining.min((count / 2).max(1));
+        let target_count = tracks.len() + cached_target;
+        extend_from_cached_provider(
+            state,
+            auth_stream,
+            &suppression,
+            &mut existing,
+            &mut tracks,
+            crate::yandex::PROVIDER,
+            target_count,
+            remaining.saturating_mul(3).max(cached_target),
+        )
+        .await;
+    }
+
     if tracks.len() < count {
-        match random_tracks(state, auth_stream, auth_json, count - tracks.len()).await {
-            Ok(random) => {
-                for track in random {
-                    let key = crate::recs::song_key(&track.artist, &track.title);
-                    let track_key = crate::proxy::search::SongKey::new(
-                        &track.artist,
-                        &track.title,
-                        track.duration_secs,
-                    );
-                    if !suppression.is_suppressed(&track.artist, &track.title)
-                        && !existing.iter().any(|existing| existing.matches(&track_key))
-                    {
-                        if !tracks.iter().any(|t| {
-                            t.id == track.id || crate::recs::song_key(&t.artist, &t.title) == key
-                        }) {
-                            existing.push(track_key);
-                            tracks.push(track);
-                        }
-                    }
-                    if tracks.len() >= count {
-                        break;
-                    }
-                }
-            }
-            Err(error) => tracing::debug!(%error, "wave random fallback failed"),
-        }
+        let remaining = count - tracks.len();
+        let sample_count = remaining
+            .saturating_mul(8)
+            .max(remaining.max(24))
+            .min(MAX_RANDOM_FALLBACK_COUNT);
+        extend_from_random(
+            state,
+            auth_stream,
+            auth_json,
+            &suppression,
+            &mut existing,
+            &mut tracks,
+            count,
+            sample_count,
+            true,
+        )
+        .await;
+    }
+
+    if tracks.len() < count {
+        extend_from_random(
+            state,
+            auth_stream,
+            auth_json,
+            &suppression,
+            &mut existing,
+            &mut tracks,
+            count,
+            MAX_RANDOM_FALLBACK_COUNT,
+            false,
+        )
+        .await;
     }
 
     Ok(tracks)
+}
+
+async fn extend_from_cached_provider(
+    state: &AppState,
+    auth_stream: &str,
+    suppression: &FeedbackSuppression,
+    existing: &mut Vec<crate::proxy::search::SongKey>,
+    tracks: &mut Vec<WaveTrack>,
+    provider: &str,
+    target_count: usize,
+    sample_count: usize,
+) {
+    let cached = match vtrack::random_by_provider(&state.db, provider, sample_count).await {
+        Ok(cached) => cached,
+        Err(error) => {
+            tracing::debug!(%error, provider, "wave cached provider fallback failed");
+            return;
+        }
+    };
+    for track in cached {
+        if suppression.is_suppressed(&track.artist, &track.title) {
+            continue;
+        }
+        let key = crate::recs::song_key(&track.artist, &track.title);
+        let track_key =
+            crate::proxy::search::SongKey::new(&track.artist, &track.title, track.duration_ms);
+        if existing.iter().any(|existing| existing.matches(&track_key)) {
+            continue;
+        }
+        if tracks
+            .iter()
+            .any(|t| t.id == track.id || crate::recs::song_key(&t.artist, &t.title) == key)
+        {
+            continue;
+        }
+        existing.push(track_key);
+        tracks.push(wave_track_from_entry(
+            SongEntry::from_virtual(&track, &state.config.streaming),
+            auth_stream,
+        ));
+        if tracks.len() >= target_count {
+            break;
+        }
+    }
+}
+
+async fn extend_from_random(
+    state: &AppState,
+    auth_stream: &str,
+    auth_json: &str,
+    suppression: &FeedbackSuppression,
+    existing: &mut Vec<crate::proxy::search::SongKey>,
+    tracks: &mut Vec<WaveTrack>,
+    target_count: usize,
+    sample_count: usize,
+    respect_suppression: bool,
+) {
+    match random_tracks(state, auth_stream, auth_json, sample_count).await {
+        Ok(random) => {
+            for track in random {
+                let key = crate::recs::song_key(&track.artist, &track.title);
+                let track_key = crate::proxy::search::SongKey::new(
+                    &track.artist,
+                    &track.title,
+                    track.duration_secs,
+                );
+                if respect_suppression && suppression.is_suppressed(&track.artist, &track.title) {
+                    continue;
+                }
+                if existing.iter().any(|existing| existing.matches(&track_key)) {
+                    continue;
+                }
+                if tracks
+                    .iter()
+                    .any(|t| t.id == track.id || crate::recs::song_key(&t.artist, &t.title) == key)
+                {
+                    continue;
+                }
+                existing.push(track_key);
+                tracks.push(track);
+                if tracks.len() >= target_count {
+                    break;
+                }
+            }
+        }
+        Err(error) => tracing::debug!(%error, sample_count, "wave random fallback failed"),
+    }
 }
 
 async fn extend_from_yandex_wave(
@@ -428,7 +540,9 @@ async fn extend_from_yandex_wave(
             continue;
         }
         existing.push(key);
-        tracks.push(wave_track_from_entry(entry, auth_stream));
+        let mut track = wave_track_from_entry(entry, auth_stream);
+        track.provider = Some(crate::yandex::PROVIDER.into());
+        tracks.push(track);
         if tracks.len() >= target_len {
             break;
         }
@@ -681,6 +795,7 @@ fn wave_track_from_entry(entry: SongEntry, auth_stream: &str) -> WaveTrack {
         id: entry.id,
         title: entry.title,
         artist: entry.artist,
+        provider: entry.provider,
         artist_id: None,
         album: entry.album,
         album_id: None,
@@ -699,6 +814,7 @@ fn wave_track_from_json(song: &serde_json::Value, auth_stream: &str) -> Option<W
             .as_str()
             .unwrap_or("Unknown artist")
             .to_string(),
+        provider: None,
         artist_id: song["artistId"].as_str().map(str::to_string),
         album: song["album"].as_str().map(str::to_string),
         album_id: song["albumId"].as_str().map(str::to_string),
