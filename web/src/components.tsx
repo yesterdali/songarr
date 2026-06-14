@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState } from "react";
 import {
   BanIcon,
   ChevronLeftIcon,
@@ -79,6 +79,45 @@ export function Cover({
         }`}
       />
     </span>
+  );
+}
+
+function SeekBar({
+  duration,
+  currentTime,
+  progress,
+  seek,
+}: {
+  duration: number;
+  currentTime: number;
+  progress: number;
+  seek: (seconds: number) => void;
+}) {
+  const safeProgress = Math.min(Math.max(progress, 0), 100);
+  const disabled = duration <= 0;
+  return (
+    <div className="relative h-8">
+      <div className="absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden bg-[#e9e2d4]/15">
+        <div
+          className="h-full origin-left bg-gradient-to-r from-[#7a0c1f] to-wave-pink transition-transform duration-200 ease-linear"
+          style={{ transform: `scaleX(${safeProgress / 100})` }}
+        />
+      </div>
+      <div
+        className="absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-[3px] bg-[#e9e2d4] shadow-[0_0_10px_rgb(196_30_58/0.75)] transition-[left] duration-200 ease-linear"
+        style={{ left: `${safeProgress}%` }}
+      />
+      <input
+        type="range"
+        min={0}
+        max={duration || 1}
+        value={disabled ? 0 : currentTime}
+        disabled={disabled}
+        onChange={(event) => seek(Number(event.target.value))}
+        aria-label="seek"
+        className="absolute inset-x-0 top-1/2 h-8 -translate-y-1/2 cursor-pointer opacity-0 disabled:cursor-default"
+      />
+    </div>
   );
 }
 
@@ -539,14 +578,11 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="mt-5">
-          <input
-            type="range"
-            min={0}
-            max={displayDuration}
-            value={displayDuration ? displayTime : 0}
-            onChange={(event) => seek(Number(event.target.value))}
-            className="slider smooth-slider w-full"
-            style={{ "--p": `${progress}%` } as CSSProperties}
+          <SeekBar
+            duration={displayDuration}
+            currentTime={displayTime}
+            progress={progress}
+            seek={seek}
           />
           <div className="flex justify-between text-xs font-medium text-white/50">
             <span>{formatTime(displayTime)}</span>
