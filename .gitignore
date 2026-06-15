@@ -9,3 +9,11 @@
 tests/harness/data/
 .claude/settings.local.json
 .claude/
+apps/songarr_wave/.dart_tool/
+apps/songarr_wave/build/
+apps/songarr_wave/android/.gradle/
+apps/songarr_wave/ios/Flutter/ephemeral/
+apps/songarr_wave/macos/Flutter/ephemeral/
+apps/songarr_wave/android/key.properties
+apps/songarr_wave/*.jks
+apps/songarr_wave/*.keystore
