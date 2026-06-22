@@ -12,16 +12,22 @@ RUN npm run build
 FROM rust:1-slim-bookworm AS build
 WORKDIR /build
 
-# Cache the dependency build separately from source changes.
+# Cache the dependency build separately from source changes. The discord-bot
+# workspace member's manifest must be present for cargo to parse the workspace,
+# but we only build the proxy (`-p songarr-proxy`), so the bot's heavy deps
+# (songbird/opus) never compile into this image.
 COPY Cargo.toml Cargo.lock ./
-RUN mkdir src && echo 'fn main() {}' > src/main.rs \
-    && cargo build --release \
-    && rm -rf src
+COPY discord-bot/Cargo.toml ./discord-bot/Cargo.toml
+RUN mkdir -p src discord-bot/src \
+    && echo 'fn main() {}' > src/main.rs \
+    && echo 'fn main() {}' > discord-bot/src/main.rs \
+    && cargo build --release -p songarr-proxy \
+    && rm -rf src discord-bot/src
 
 COPY src ./src
 COPY migrations ./migrations
 COPY --from=web-build /build/web/dist ./web/dist
-RUN touch src/main.rs && cargo build --release
+RUN touch src/main.rs && cargo build --release -p songarr-proxy
 
 FROM debian:bookworm-slim
 
