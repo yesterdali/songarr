@@ -125,7 +125,7 @@ class _WaveShellState extends State<WaveShell> {
             if (_controller.current == null) return const SizedBox.shrink();
             return _DockSurface(
               radius: 0,
-              child: MiniPlayer(
+              child: DesktopPlayerBar(
                 controller: _controller,
                 onOpen: _openNowPlaying,
               ),
@@ -463,4 +463,260 @@ class MiniPlayer extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Spotify-style desktop player bar: track info (left), transport + seek
+/// (center), visualizer + volume (right).
+class DesktopPlayerBar extends StatelessWidget {
+  const DesktopPlayerBar({required this.controller, required this.onOpen, super.key});
+  final WaveController controller;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final song = controller.current;
+    if (song == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Expanded(flex: 3, child: _BarTrackInfo(controller: controller, onOpen: onOpen)),
+          Expanded(flex: 4, child: _BarCenter(controller: controller)),
+          Expanded(flex: 3, child: _BarRight(controller: controller)),
+        ],
+      ),
+    );
+  }
+}
+
+class _BarTrackInfo extends StatelessWidget {
+  const _BarTrackInfo({required this.controller, required this.onOpen});
+  final WaveController controller;
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final song = controller.current!;
+    final api = controller.api;
+    final starred = controller.isStarred(song.id);
+    return Row(
+      children: [
+        Stack(
+          alignment: Alignment.bottomLeft,
+          children: [
+            PulseScale(
+              active: controller.isPlaying,
+              child: CoverArt(api: api, coverArt: song.coverArt, size: 54, borderRadius: 10),
+            ),
+            if (controller.isPlaying)
+              Positioned(
+                left: 4,
+                bottom: 4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const EqualizerBars(height: 11, color: kPink, barCount: 3),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: onOpen,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(song.title, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800, color: kCream)),
+                const SizedBox(height: 2),
+                Text(song.artist, maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: Colors.white54, fontWeight: FontWeight.w600, fontSize: 13)),
+              ],
+            ),
+          ),
+        ),
+        IconButton(
+          visualDensity: VisualDensity.compact,
+          onPressed: () => controller.toggleStar(song.id),
+          icon: Icon(
+            starred ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+            color: starred ? kPink : Colors.white54,
+            size: 20,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _BarCenter extends StatelessWidget {
+  const _BarCenter({required this.controller});
+  final WaveController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            _ToggleButton(
+              icon: Icons.shuffle_rounded,
+              active: controller.shuffle,
+              onPressed: controller.toggleShuffle,
+            ),
+            IconButton(
+              onPressed: controller.previous,
+              icon: const Icon(Icons.skip_previous_rounded, size: 26),
+              color: kCream,
+            ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              child: IconButton(
+                onPressed: controller.toggle,
+                iconSize: 22,
+                style: IconButton.styleFrom(
+                  backgroundColor: kCream,
+                  foregroundColor: kBlack,
+                  fixedSize: const Size(40, 40),
+                ),
+                icon: PlayPauseIcon(playing: controller.isPlaying, size: 22),
+              ),
+            ),
+            IconButton(
+              onPressed: () => controller.next(),
+              icon: const Icon(Icons.skip_next_rounded, size: 26),
+              color: kCream,
+            ),
+            _ToggleButton(
+              icon: Icons.repeat_one_rounded,
+              active: controller.repeatOne,
+              onPressed: controller.toggleRepeat,
+            ),
+          ],
+        ),
+        _SeekBar(controller: controller),
+      ],
+    );
+  }
+}
+
+class _ToggleButton extends StatelessWidget {
+  const _ToggleButton({required this.icon, required this.active, required this.onPressed});
+  final IconData icon;
+  final bool active;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 20, color: active ? kPink : Colors.white54),
+    );
+  }
+}
+
+class _SeekBar extends StatelessWidget {
+  const _SeekBar({required this.controller});
+  final WaveController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final player = controller.player;
+    final song = controller.current;
+    return StreamBuilder<Duration>(
+      stream: player.positionStream,
+      initialData: player.position,
+      builder: (context, snap) {
+        final pos = snap.data ?? Duration.zero;
+        final dur = player.duration ?? Duration(seconds: song?.duration ?? 1);
+        final maxMs = dur.inMilliseconds.toDouble().clamp(1.0, double.infinity);
+        return Row(
+          children: [
+            SizedBox(
+              width: 40,
+              child: Text(formatDuration(pos), textAlign: TextAlign.right,
+                  style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700)),
+            ),
+            Expanded(
+              child: SliderTheme(
+                data: _trackTheme(context),
+                child: Slider(
+                  min: 0,
+                  max: maxMs,
+                  value: pos.inMilliseconds.toDouble().clamp(0.0, maxMs),
+                  onChanged: (v) => player.seek(Duration(milliseconds: v.round())),
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 40,
+              child: Text(formatDuration(dur),
+                  style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w700)),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _BarRight extends StatelessWidget {
+  const _BarRight({required this.controller});
+  final WaveController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.end,
+      children: [
+        // Decorative live visualizer (matches the reference player).
+        SizedBox(
+          height: 18,
+          child: EqualizerBars(playing: controller.isPlaying, height: 18, color: kPink, barCount: 5),
+        ),
+        const SizedBox(width: 14),
+        Icon(
+          controller.volume <= 0.01
+              ? Icons.volume_off_rounded
+              : controller.volume < 0.5
+                  ? Icons.volume_down_rounded
+                  : Icons.volume_up_rounded,
+          color: Colors.white54,
+          size: 20,
+        ),
+        SizedBox(
+          width: 110,
+          child: SliderTheme(
+            data: _trackTheme(context),
+            child: Slider(
+              min: 0,
+              max: 1,
+              value: controller.volume,
+              onChanged: controller.setVolume,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+SliderThemeData _trackTheme(BuildContext context) {
+  return SliderTheme.of(context).copyWith(
+    trackHeight: 3,
+    activeTrackColor: kPink,
+    inactiveTrackColor: kCream.withValues(alpha: 0.16),
+    thumbColor: kCream,
+    thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+    overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+  );
 }

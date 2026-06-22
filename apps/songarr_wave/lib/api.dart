@@ -243,6 +243,13 @@ class SongarrApi {
     }).toString();
   }
 
+  /// Original, untranscoded file (no DRM). For library tracks this is the
+  /// real FLAC/MP3/etc.; for not-yet-imported tracks the server can only hand
+  /// over its live Opus transcode.
+  String downloadUrl(Song song) {
+    return _uri('/rest/download', {'id': song.id}).toString();
+  }
+
   Future<void> ping() async {
     final body = await _getJson(_uri('/rest/ping'));
     _ensureOk(body);

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import 'api.dart';
+import 'download_manager.dart';
 import 'media_session.dart';
 
 /// Holds the playback queue, the audio player, Wave state, and the system
@@ -42,6 +43,7 @@ class WaveController extends ChangeNotifier {
   }
 
   final SongarrApi api;
+  late final DownloadManager downloads = DownloadManager(api);
   late final AudioPlayer _player;
   StreamSubscription<PlayerState>? _playerSub;
   StreamSubscription<PositionDiscontinuity>? _discontinuitySub;
@@ -58,6 +60,11 @@ class WaveController extends ChangeNotifier {
   int _loadToken = 0;
   bool loadingWave = false;
   String? error;
+
+  // Spotify-style transport state.
+  bool shuffle = false;
+  bool repeatOne = false;
+  double volume = 1.0;
 
   AudioPlayer get player => _player;
   List<Song> get queue => List.unmodifiable(_queue);
@@ -301,6 +308,29 @@ class WaveController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Shuffle the upcoming tracks (the current one stays put).
+  void toggleShuffle() {
+    shuffle = !shuffle;
+    if (shuffle && _index + 1 < _queue.length) {
+      final rest = _queue.sublist(_index + 1)..shuffle();
+      _queue.replaceRange(_index + 1, _queue.length, rest);
+    }
+    notifyListeners();
+  }
+
+  /// Toggle repeat-one: the player loops the current track instead of advancing.
+  void toggleRepeat() {
+    repeatOne = !repeatOne;
+    unawaited(_player.setLoopMode(repeatOne ? LoopMode.one : LoopMode.off));
+    notifyListeners();
+  }
+
+  void setVolume(double value) {
+    volume = value.clamp(0.0, 1.0);
+    unawaited(_player.setVolume(volume));
+    notifyListeners();
+  }
+
   Future<void> toggleStar(String id) async {
     final wasStarred = _starredIds.contains(id);
     if (wasStarred) {
@@ -335,6 +365,7 @@ class WaveController extends ChangeNotifier {
     _playerSub?.cancel();
     _discontinuitySub?.cancel();
     _media.dispose();
+    downloads.dispose();
     _player.dispose();
     super.dispose();
   }

@@ -34,13 +34,26 @@ dependencies:
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+  # Playback engine. Native backends are used per platform: ExoPlayer
+  # (Android), AVPlayer (iOS/macOS), just_audio_web (web) — all efficient.
   just_audio: ^0.10.5
+  # Linux & Windows have no native just_audio backend, so bridge them to
+  # libmpv via media_kit. Phones/web/macOS keep their native backends.
+  just_audio_media_kit: ^2.0.6
+  media_kit_libs_linux: ^1.1.3
+  media_kit_libs_windows_audio: ^1.0.9
   http: ^1.6.0
   # Typed browser bindings for the web MediaSession backend (used only via a
   # conditional import; harmless as a dependency on other platforms).
   web: ^1.1.0
   # Cormorant serif (incl. Cyrillic) to match the gothic web theme.
   google_fonts: ^6.2.1
+  # Downloads: temp staging dir + publishing into Android's public Music
+  # collection via MediaStore (no original-file re-encoding, no DRM).
+  path_provider: ^2.1.4
+  media_store_plus: ^0.1.3
+  # Desktop "choose a folder" dialog for downloads.
+  file_picker: ^8.1.2
 
 dev_dependencies:
   flutter_test:

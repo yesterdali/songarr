@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'controller.dart';
+import 'download_manager.dart';
 import 'theme.dart';
 import 'widgets.dart';
 
@@ -1039,10 +1040,23 @@ class _AlbumScreenState extends State<AlbumScreen> {
                             ),
                           ),
                           const SizedBox(height: 12),
-                          PlayAllButton(
-                            onPressed: songs.isEmpty
-                                ? null
-                                : () => widget.controller.playQueue(songs, 0),
+                          Row(
+                            children: [
+                              PlayAllButton(
+                                onPressed: songs.isEmpty
+                                    ? null
+                                    : () => widget.controller.playQueue(songs, 0),
+                              ),
+                              const SizedBox(width: 6),
+                              if (album != null && songs.isNotEmpty)
+                                DownloadButton(
+                                  controller: widget.controller,
+                                  size: 24,
+                                  downloadKey: DownloadManager.albumKey(album.id),
+                                  onDownload: () => widget.controller.downloads
+                                      .downloadAlbum(album.id, album.name, songs),
+                                ),
+                            ],
                           ),
                         ],
                       ),

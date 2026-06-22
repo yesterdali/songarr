@@ -6,7 +6,8 @@ plugins {
 
 android {
     namespace = "com.example.songarr_wave"
-    compileSdk = flutter.compileSdkVersion
+    // media_store_plus (androidx.exifinterface) requires compiling against 34+.
+    compileSdk = 36
     ndkVersion = flutter.ndkVersion
 
     compileOptions {

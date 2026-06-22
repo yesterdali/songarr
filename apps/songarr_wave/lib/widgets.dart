@@ -4,7 +4,78 @@ import 'package:flutter/material.dart';
 
 import 'api.dart';
 import 'controller.dart';
+import 'download_manager.dart';
 import 'theme.dart';
+
+/// Download affordance that reflects state for [downloadKey]: idle download
+/// icon → spinner with progress → done check → error (tap to retry).
+class DownloadButton extends StatelessWidget {
+  const DownloadButton({
+    required this.controller,
+    required this.downloadKey,
+    required this.onDownload,
+    this.size = 20,
+    super.key,
+  });
+
+  final WaveController controller;
+  final String downloadKey;
+  final VoidCallback onDownload;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: controller.downloads,
+      builder: (context, _) {
+        final task = controller.downloads.taskFor(downloadKey);
+        if (task == null) {
+          return IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: size,
+            color: Colors.white54,
+            tooltip: 'Скачать',
+            onPressed: onDownload,
+            icon: const Icon(Icons.download_rounded),
+          );
+        }
+        switch (task.state) {
+          case DownloadState.downloading:
+            return SizedBox(
+              width: size + 16,
+              height: size + 16,
+              child: Padding(
+                padding: const EdgeInsets.all(10),
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  value: task.progress > 0 ? task.progress : null,
+                  color: kPink,
+                ),
+              ),
+            );
+          case DownloadState.done:
+            return IconButton(
+              visualDensity: VisualDensity.compact,
+              iconSize: size,
+              color: kPink,
+              tooltip: 'Скачано',
+              onPressed: null,
+              icon: const Icon(Icons.download_done_rounded),
+            );
+          case DownloadState.error:
+            return IconButton(
+              visualDensity: VisualDensity.compact,
+              iconSize: size,
+              color: Colors.orangeAccent,
+              tooltip: task.error ?? 'Ошибка',
+              onPressed: onDownload,
+              icon: const Icon(Icons.error_outline_rounded),
+            );
+        }
+      },
+    );
+  }
+}
 
 /// Animated "now playing" equalizer — bars bounce while [playing], and freeze
 /// short when paused. The clearest signal that a track is live.
@@ -450,6 +521,11 @@ class SongTile extends StatelessWidget {
                         ),
                       ],
                     ),
+                  ),
+                  DownloadButton(
+                    controller: controller,
+                    downloadKey: song.id,
+                    onDownload: () => controller.downloads.downloadTrack(song),
                   ),
                   IconButton(
                     visualDensity: VisualDensity.compact,

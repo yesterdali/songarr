@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'api.dart';
+import 'desktop_audio.dart';
 import 'shell.dart';
 import 'theme.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  // Enable the libmpv backend on Linux/Windows; no-op elsewhere.
+  initDesktopAudio();
   runApp(const SongarrWaveApp());
 }
 

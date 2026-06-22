@@ -255,6 +255,12 @@ class _TitleRow extends StatelessWidget {
             ],
           ),
         ),
+        DownloadButton(
+          controller: controller,
+          size: 26,
+          downloadKey: song.id,
+          onDownload: () => controller.downloads.downloadTrack(song),
+        ),
         IconButton(
           onPressed: () => controller.toggleStar(song.id),
           iconSize: 28,
