@@ -43,6 +43,9 @@ rust-embed = "8"
 
 [dev-dependencies]
 
+[workspace]
+members = ["discord-bot"]
+
 [profile.release]
 strip = true
 lto = "thin"
