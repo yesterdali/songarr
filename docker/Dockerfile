@@ -18,11 +18,14 @@ WORKDIR /build
 # (songbird/opus) never compile into this image.
 COPY Cargo.toml Cargo.lock ./
 COPY discord-bot/Cargo.toml ./discord-bot/Cargo.toml
+# Keep the dummy discord-bot/src/main.rs so cargo can still parse that
+# workspace member in the final build (it is never compiled — we only build
+# -p songarr-proxy). Only the proxy's own dummy src is removed.
 RUN mkdir -p src discord-bot/src \
     && echo 'fn main() {}' > src/main.rs \
     && echo 'fn main() {}' > discord-bot/src/main.rs \
     && cargo build --release -p songarr-proxy \
-    && rm -rf src discord-bot/src
+    && rm -rf src
 
 COPY src ./src
 COPY migrations ./migrations
