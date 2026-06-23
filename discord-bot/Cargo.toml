@@ -9,11 +9,15 @@ description = "Discord bot that plays music from a Songarr/Subsonic server in vo
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync"] }
 async-trait = "0.1"
 poise = "0.6"
-songbird = { version = "0.4", features = ["builtin-queue"] }
+# 0.6 implements Discord's DAVE (E2EE voice) protocol via the `davey` dep in its
+# `driver` feature; Discord now closes voice with code 4017 ("E2EE/DAVE protocol
+# required") against clients that lack it. Still targets serenity 0.12 (poise) +
+# reqwest 0.12, so this is a version bump, not a stack swap.
+songbird = { version = "0.6", features = ["builtin-queue"] }
 symphonia = { version = "0.5", features = ["mp3", "isomp4", "aac", "alac"] }
-# Pinned to 0.11 to match songbird's reqwest so the voice input Client type
-# unifies (songbird 0.4 still uses reqwest 0.11).
-reqwest = { version = "0.11", default-features = false, features = [
+# Matches songbird 0.6's reqwest so the voice input (HttpRequest) Client type
+# unifies — no second TLS stack / client type in the graph.
+reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
     "stream",
     "json",
