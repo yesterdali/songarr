@@ -1,0 +1,38 @@
+# Discord bot image. Build context is the repository root:
+#   docker build -f docker/Dockerfile.bot -t songarr-discord .
+FROM rust:1-slim-bookworm AS build
+WORKDIR /build
+
+# songbird links libopus; with libopus-dev + pkg-config present, audiopus_sys
+# uses the system library (no cmake build of Opus from source).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libopus-dev pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cache dependency build. Both workspace members' manifests must be present so
+# cargo can parse the workspace; only -p songarr-discord is compiled. A dummy
+# proxy src/main.rs satisfies the proxy member's target requirement without
+# pulling in the proxy's build.
+COPY Cargo.toml Cargo.lock ./
+COPY discord-bot/Cargo.toml ./discord-bot/Cargo.toml
+RUN mkdir -p src discord-bot/src \
+    && echo 'fn main() {}' > src/main.rs \
+    && echo 'fn main() {}' > discord-bot/src/main.rs \
+    && cargo build --release -p songarr-discord \
+    && rm -rf discord-bot/src
+
+COPY discord-bot/src ./discord-bot/src
+RUN touch discord-bot/src/main.rs && cargo build --release -p songarr-discord
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libopus0 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /build/target/release/songarr-discord /usr/local/bin/songarr-discord
+
+# Per-user account links live here.
+ENV SONGARR_DISCORD_DB=/data/songarr-discord.db
+VOLUME ["/data"]
+
+ENTRYPOINT ["/usr/local/bin/songarr-discord"]

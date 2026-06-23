@@ -40,6 +40,30 @@ services:
       SONGARR_YANDEX_ACCESS_TOKEN: "${SONGARR_YANDEX_ACCESS_TOKEN:-}"
       SONGARR_YANDEX_REFRESH_TOKEN: "${SONGARR_YANDEX_REFRESH_TOKEN:-}"
 
+  # Discord bot — plays Songarr in voice channels. Deliberately NOT behind
+  # gluetun: it needs plain outbound to Discord (incl. voice UDP). It reaches
+  # Songarr over the compose network by service name.
+  songarr-discord:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.bot
+    restart: unless-stopped
+    depends_on:
+      - songarr-proxy
+    environment:
+      DISCORD_TOKEN: "${DISCORD_TOKEN:?set DISCORD_TOKEN in your .env}"
+      # Your test server's ID makes slash commands appear instantly there;
+      # leave empty for (slower, up to ~1h) global registration.
+      DISCORD_TEST_GUILD: "${DISCORD_TEST_GUILD:-}"
+      # Where the bot reaches Songarr. With this example's networking that's the
+      # service name. If your Songarr uses `network_mode: "service:gluetun"`,
+      # point this at gluetun's published port instead — e.g.
+      # http://host.docker.internal:4534 with
+      # `extra_hosts: ["host.docker.internal:host-gateway"]`.
+      SONGARR_URL: "${SONGARR_URL:-http://songarr-proxy:4534}"
+    volumes:
+      - ./data/songarr-discord:/data   # per-user account links (sqlite)
+
   gluetun:
     image: qmcgaw/gluetun:latest
     restart: unless-stopped
