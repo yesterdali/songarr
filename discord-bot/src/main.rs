@@ -6,6 +6,7 @@ mod store;
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use poise::serenity_prelude as serenity;
 use songbird::SerenityInit;
@@ -33,8 +34,12 @@ async fn main() -> anyhow::Result<()> {
 
     let config = config::Config::from_env()?;
     let db = store::init(&config.db_path).await?;
+    // Bounded timeouts so an unreachable/wrong SONGARR_URL fails fast with a
+    // clear error instead of leaving a slash command "thinking" forever.
     let http = reqwest::Client::builder()
         .user_agent("songarr-discord/0.1")
+        .connect_timeout(Duration::from_secs(8))
+        .timeout(Duration::from_secs(20))
         .build()?;
 
     let data = Data {
@@ -46,6 +51,7 @@ async fn main() -> anyhow::Result<()> {
 
     let options = poise::FrameworkOptions {
         commands: commands::all(),
+        on_error: |error| Box::pin(on_error(error)),
         ..Default::default()
     };
 
@@ -83,4 +89,27 @@ async fn main() -> anyhow::Result<()> {
 
     client.start().await?;
     Ok(())
+}
+
+/// Surface command failures to the user (poise's default only logs them), so a
+/// bad URL / wrong password / unreachable server shows up in Discord instead of
+/// a silent "nothing happened".
+async fn on_error(error: poise::FrameworkError<'_, Data, Error>) {
+    match error {
+        poise::FrameworkError::Command { error, ctx, .. } => {
+            tracing::error!(command = ctx.command().name, %error, "command failed");
+            let _ = ctx
+                .send(
+                    poise::CreateReply::default()
+                        .ephemeral(true)
+                        .content(format!("⚠️ {error}")),
+                )
+                .await;
+        }
+        other => {
+            if let Err(e) = poise::builtins::on_error(other).await {
+                tracing::error!(%e, "error while handling a framework error");
+            }
+        }
+    }
 }
