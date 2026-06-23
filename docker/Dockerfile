@@ -1,13 +1,17 @@
 # Build context is the repository root:
 #   docker build -f docker/Dockerfile -t songarr-proxy .
-FROM node:22-bookworm-slim AS web-build
-WORKDIR /build/web
+#
+# /wave serves the FLUTTER app (apps/songarr_wave) built for web. The React
+# PWA source is kept in web/ for later; to switch back, restore the previous
+# node/npm web-build stage (build web/ → /build/web/dist) instead of this one.
+FROM ghcr.io/cirruslabs/flutter:stable AS web-build
+WORKDIR /build/app
 
-COPY web/package*.json ./
-RUN npm ci
-
-COPY web ./
-RUN npm run build
+COPY apps/songarr_wave ./
+RUN flutter pub get \
+    && flutter build web --release --base-href /wave/ \
+    && mkdir -p /build/web \
+    && cp -r build/web /build/web/dist
 
 FROM rust:1-slim-bookworm AS build
 WORKDIR /build
