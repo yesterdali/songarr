@@ -58,8 +58,9 @@ async fn main() -> anyhow::Result<()> {
     let test_guild = config.test_guild;
     let framework = poise::Framework::builder()
         .options(options)
-        .setup(move |ctx, _ready, framework| {
+        .setup(move |ctx, ready, framework| {
             Box::pin(async move {
+                let count = framework.options().commands.len();
                 match test_guild {
                     Some(id) => {
                         poise::builtins::register_in_guild(
@@ -68,10 +69,19 @@ async fn main() -> anyhow::Result<()> {
                             serenity::GuildId::new(id),
                         )
                         .await?;
+                        tracing::info!(
+                            "connected as {}; registered {count} commands to guild {id} (instant)",
+                            ready.user.name,
+                        );
                     }
                     None => {
                         poise::builtins::register_globally(ctx, &framework.options().commands)
                             .await?;
+                        tracing::warn!(
+                            "connected as {}; registered {count} commands GLOBALLY — they can \
+                             take up to ~1h to appear. Set DISCORD_TEST_GUILD for instant testing.",
+                            ready.user.name,
+                        );
                     }
                 }
                 Ok(data)
