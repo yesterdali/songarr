@@ -71,7 +71,10 @@ pub async fn enqueue(
 pub struct WaveRefiller {
     pub manager: Arc<Songbird>,
     pub guild_id: GuildId,
+    /// API client (wave_next); has a total timeout.
     pub http: reqwest::Client,
+    /// Streaming client (audio fetch); no total timeout.
+    pub stream_http: reqwest::Client,
     pub link: Link,
     pub labels: LabelMap,
 }
@@ -87,7 +90,7 @@ impl VoiceEventHandler for WaveRefiller {
         let client = SongarrClient::new(&self.http, &self.link);
         let tracks: Vec<Track> = client.wave_next(None, 12).await.unwrap_or_default();
         for track in tracks {
-            let input = HttpRequest::new(self.http.clone(), client.stream_url(&track));
+            let input = HttpRequest::new(self.stream_http.clone(), client.stream_url(&track));
             let handle = {
                 let mut handler = call_lock.lock().await;
                 handler.enqueue_input(input.into()).await
@@ -107,12 +110,13 @@ pub async fn install_wave_refiller(
     manager: Arc<Songbird>,
     guild_id: GuildId,
     http: reqwest::Client,
+    stream_http: reqwest::Client,
     link: Link,
     labels: LabelMap,
 ) {
     let mut handler = call.lock().await;
     handler.add_global_event(
         Event::Track(TrackEvent::End),
-        WaveRefiller { manager, guild_id, http, link, labels },
+        WaveRefiller { manager, guild_id, http, stream_http, link, labels },
     );
 }

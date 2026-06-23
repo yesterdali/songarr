@@ -86,7 +86,7 @@ async fn play(
     let label = track.label();
 
     let (_, _, call) = join_user_channel(ctx).await?;
-    enqueue(&call, &http, url, label.clone(), &ctx.data().labels).await;
+    enqueue(&call, &ctx.data().stream_http, url, label.clone(), &ctx.data().labels).await;
     ctx.say(format!("▶️ В очередь: **{label}**")).await?;
     Ok(())
 }
@@ -107,13 +107,15 @@ async fn wave(ctx: Context<'_>) -> Result<(), Error> {
 
     let (manager, guild_id, call) = join_user_channel(ctx).await?;
     for track in &tracks {
-        enqueue(&call, &http, client.stream_url(track), track.label(), &ctx.data().labels).await;
+        enqueue(&call, &ctx.data().stream_http, client.stream_url(track), track.label(), &ctx.data().labels)
+            .await;
     }
     install_wave_refiller(
         &call,
         manager,
         guild_id,
         http.clone(),
+        ctx.data().stream_http.clone(),
         link.clone(),
         ctx.data().labels.clone(),
     )

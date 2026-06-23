@@ -19,7 +19,11 @@ pub type Context<'a> = poise::Context<'a, Data, Error>;
 pub struct Data {
     pub config: config::Config,
     pub db: sqlx::SqlitePool,
+    /// Short API calls (ping/search/wave): carries a total timeout to fail fast.
     pub http: reqwest::Client,
+    /// Audio streaming: NO total timeout (a track runs far longer than any such
+    /// deadline would allow), only connect + read-inactivity timeouts.
+    pub stream_http: reqwest::Client,
     pub labels: playback::LabelMap,
 }
 
@@ -41,11 +45,21 @@ async fn main() -> anyhow::Result<()> {
         .connect_timeout(Duration::from_secs(8))
         .timeout(Duration::from_secs(20))
         .build()?;
+    // Streaming client: a track's body is read for its whole duration, so a
+    // total `.timeout()` would abort playback mid-song (~20s in). Use only a
+    // connect timeout plus a read-inactivity timeout, so a genuinely stalled
+    // connection still errors out and lets the next track start.
+    let stream_http = reqwest::Client::builder()
+        .user_agent("songarr-discord/0.1")
+        .connect_timeout(Duration::from_secs(8))
+        .read_timeout(Duration::from_secs(30))
+        .build()?;
 
     let data = Data {
         config: config.clone(),
         db,
         http,
+        stream_http,
         labels: Arc::new(Mutex::new(HashMap::new())),
     };
 
