@@ -13,6 +13,7 @@ Get a token once with::
 
 from __future__ import annotations
 
+import getpass
 import json
 import sys
 from typing import Any
@@ -112,22 +113,44 @@ def cmd_download(payload: dict[str, Any]) -> None:
     print(json.dumps({"url": url, "codec": codec}, ensure_ascii=False))
 
 
-def cmd_login(payload: dict[str, Any]) -> None:
-    login = payload.get("login")
-    password = payload.get("password")
-    if not login or not password:
-        fail('login requires {"login": "...", "password": "..."} on stdin')
+def _interactive() -> bool:
+    return sys.stdin.isatty()
 
+
+def _ask(label: str, given: Any, secret: bool = False) -> str:
+    if given:
+        return str(given)
+    if not _interactive():
+        fail(f"{label} is required (run interactively without -T, or pass it in the JSON)")
+    value = getpass.getpass(f"{label}: ") if secret else input(f"{label}: ")
+    return value.strip()
+
+
+def cmd_login(payload: dict[str, Any]) -> None:
+    login = _ask("VK login (phone or email)", payload.get("login"))
+    password = _ask("VK password", payload.get("password"), secret=True)
     pending_code: dict[str, Any] = {"value": payload.get("code")}
 
     def two_factor() -> tuple[str, bool]:
         code = pending_code["value"]
+        pending_code["value"] = None
         if not code:
-            fail(
-                "VK asked for a 2FA code. Re-run with "
-                '{"login","password","code"} on stdin.'
-            )
+            if not _interactive():
+                fail('VK asked for a 2FA code. Re-run with {"login","password","code"}.')
+            code = input("2FA code (SMS/app): ").strip()
         return str(code), True
+
+    def captcha_handler(captcha: Any):
+        url = captcha.get_url()
+        print(
+            f"\nVK requires a captcha. Open this image and read the text:\n  {url}\n",
+            file=sys.stderr,
+            flush=True,
+        )
+        if not _interactive():
+            fail("Captcha required — run interactively (without -T) to solve it.")
+        key = input("Captcha text: ").strip()
+        return captcha.try_again(key)
 
     session = vk_api.VkApi(
         login=login,
@@ -136,6 +159,7 @@ def cmd_login(payload: dict[str, Any]) -> None:
         client_secret=KATE_CLIENT_SECRET,
         api_version="5.131",
         auth_handler=two_factor,
+        captcha_handler=captcha_handler,
     )
     session.http.headers["User-Agent"] = KATE_USER_AGENT
     session.auth(token_only=True)
@@ -158,7 +182,10 @@ def main() -> None:
     if not handler:
         fail("usage: songarr-vk <login|track|download>")
     try:
-        handler(read_payload())
+        # `login` is interactive (captcha/2FA prompts), so don't block on stdin
+        # when run from a terminal; other commands always read their JSON.
+        payload = {} if (command == "login" and sys.stdin.isatty()) else read_payload()
+        handler(payload)
     except SystemExit:
         raise
     except Exception as exc:
