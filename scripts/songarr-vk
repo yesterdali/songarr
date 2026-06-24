@@ -18,6 +18,14 @@ import json
 import sys
 from typing import Any
 
+# The runtime image's locale isn't guaranteed UTF-8; without this, input() of a
+# non-ASCII captcha/2FA value crashes with a surrogate UnicodeEncodeError.
+for _stream in (sys.stdin, sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def fail(message: str, code: int = 1) -> None:
     print(message, file=sys.stderr)
@@ -161,7 +169,10 @@ def cmd_login(payload: dict[str, Any]) -> None:
         auth_handler=two_factor,
         captcha_handler=captcha_handler,
     )
-    session.http.headers["User-Agent"] = KATE_USER_AGENT
+    # NB: do NOT set the Kate Mobile UA here. VK serves an "update your app"
+    # placeholder instead of a real captcha image to that old UA. Auth issues an
+    # audio-capable token from the app id alone; the Kate UA is only needed when
+    # *calling* audio.* methods (see api_from_payload).
     session.auth(token_only=True)
     token = session.token.get("access_token")
     if not token:
