@@ -173,9 +173,15 @@ impl<'a> SongarrClient<'a> {
     }
 
     /// Remote control: pull commands the app queued for this user (seq > after).
-    pub async fn remote_commands(&self, after: i64) -> anyhow::Result<Vec<RemoteCommand>> {
+    /// `wait` (secs) long-polls — the request blocks until a command arrives or
+    /// the timeout, so control reaches the bot near-instantly.
+    pub async fn remote_commands(&self, after: i64, wait: u64) -> anyhow::Result<Vec<RemoteCommand>> {
         let after = after.to_string();
-        let url = self.build_url("/wave/api/remote/commands", &[("after", after.as_str())]);
+        let wait = wait.to_string();
+        let url = self.build_url(
+            "/wave/api/remote/commands",
+            &[("after", after.as_str()), ("wait", wait.as_str())],
+        );
         let response = self.http.get(&url).send().await?.error_for_status()?;
         let body: serde_json::Value = response.json().await?;
         let commands = body.get("commands").and_then(|v| v.as_array()).cloned().unwrap_or_default();

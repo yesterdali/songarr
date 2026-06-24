@@ -545,12 +545,21 @@ type RawRemoteState = {
   isPlaying?: boolean;
   queue?: RawSong[];
   updatedAt?: number;
+  rev?: number;
 };
 
-/** The bot's reported playback (for the remote playbar). */
-export async function getRemoteState(session: WaveSession): Promise<RemoteState> {
-  const response = await fetch(apiUrl(session, `/wave/api/remote/state?${authQuery(session)}`), {
+/** The bot's reported playback (for the remote playbar). Pass `wait`+`since` to
+ *  long-poll: the request blocks until the state advances past `since` (rev). */
+export async function getRemoteState(
+  session: WaveSession,
+  opts: { wait?: number; since?: number; signal?: AbortSignal } = {},
+): Promise<RemoteState> {
+  const query = new URLSearchParams(authQuery(session));
+  if (opts.wait) query.set("wait", String(opts.wait));
+  if (opts.since) query.set("since", String(opts.since));
+  const response = await fetch(apiUrl(session, `/wave/api/remote/state?${query.toString()}`), {
     headers: { Accept: "application/json" },
+    signal: opts.signal,
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const raw = (await response.json()) as RawRemoteState;
@@ -571,6 +580,7 @@ export async function getRemoteState(session: WaveSession): Promise<RemoteState>
     isPlaying: Boolean(raw.isPlaying),
     queue: (raw.queue ?? []).map(toSong),
     updatedAt: raw.updatedAt ?? 0,
+    rev: raw.rev ?? 0,
     fetchedAt: Date.now(),
   };
 }

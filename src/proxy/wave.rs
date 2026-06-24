@@ -344,7 +344,11 @@ pub async fn remote_command_handler(
     .execute(&state.db)
     .await;
     match result {
-        Ok(_) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+        Ok(_) => {
+            // Wake the bot's long-poll immediately (push-like control).
+            state.remote_waiters(&username).await.commands.notify_waiters();
+            Json(serde_json::json!({ "status": "ok" })).into_response()
+        }
         Err(error) => {
             tracing::warn!(%error, username, action = body.action, "remote command insert failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "failed").into_response()
@@ -352,7 +356,25 @@ pub async fn remote_command_handler(
     }
 }
 
-/// Bot → poll: fetch (and prune) commands newer than `after`.
+async fn fetch_remote_commands(
+    db: &sqlx::SqlitePool,
+    username: &str,
+    after: i64,
+) -> Vec<RemoteCommandRow> {
+    sqlx::query_as::<_, RemoteCommandRow>(
+        "SELECT seq, action, payload FROM remote_command
+         WHERE username = ? AND seq > ? ORDER BY seq LIMIT 100",
+    )
+    .bind(username)
+    .bind(after)
+    .fetch_all(db)
+    .await
+    .unwrap_or_default()
+}
+
+/// Bot → poll: fetch commands newer than `after`. With `wait=<secs>` this
+/// long-polls — it blocks until a command arrives (or the timeout), so control
+/// is effectively pushed rather than polled.
 pub async fn remote_commands_handler(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -362,21 +384,25 @@ pub async fn remote_commands_handler(
         Err(response) => return response,
     };
     let after: i64 = params.get("after").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let wait: u64 = params.get("wait").and_then(|v| v.parse().ok()).unwrap_or(0).min(30);
     // Everything <= after is acknowledged; prune it so the log stays small.
     let _ = sqlx::query("DELETE FROM remote_command WHERE username = ? AND seq <= ?")
         .bind(&username)
         .bind(after)
         .execute(&state.db)
         .await;
-    let rows = sqlx::query_as::<_, RemoteCommandRow>(
-        "SELECT seq, action, payload FROM remote_command
-         WHERE username = ? AND seq > ? ORDER BY seq LIMIT 100",
-    )
-    .bind(&username)
-    .bind(after)
-    .fetch_all(&state.db)
-    .await
-    .unwrap_or_default();
+
+    let waiters = state.remote_waiters(&username).await;
+    // Register the wakeup BEFORE the first read so a command posted in between
+    // still resolves the wait (no lost notification).
+    let notified = waiters.commands.notified();
+    tokio::pin!(notified);
+    let mut rows = fetch_remote_commands(&state.db, &username, after).await;
+    if rows.is_empty() && wait > 0 {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(wait), notified).await;
+        rows = fetch_remote_commands(&state.db, &username, after).await;
+    }
+
     let commands: Vec<_> = rows
         .into_iter()
         .map(|row| {
@@ -407,8 +433,8 @@ pub async fn remote_state_report_handler(
     let result = sqlx::query(
         "INSERT INTO remote_state
             (username, connected, track_id, title, artist, album, cover_art,
-             position_ms, duration_ms, is_playing, queue_json, updated_at_epoch)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             position_ms, duration_ms, is_playing, queue_json, updated_at_epoch, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
          ON CONFLICT(username) DO UPDATE SET
             connected = excluded.connected,
             track_id = excluded.track_id,
@@ -420,7 +446,8 @@ pub async fn remote_state_report_handler(
             duration_ms = excluded.duration_ms,
             is_playing = excluded.is_playing,
             queue_json = excluded.queue_json,
-            updated_at_epoch = excluded.updated_at_epoch",
+            updated_at_epoch = excluded.updated_at_epoch,
+            rev = rev + 1",
     )
     .bind(&username)
     .bind(body.connected as i64)
@@ -461,7 +488,11 @@ pub async fn remote_state_report_handler(
         }
     }
     match result {
-        Ok(_) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+        Ok(_) => {
+            // Wake the app's state long-poll immediately.
+            state.remote_waiters(&username).await.state.notify_waiters();
+            Json(serde_json::json!({ "status": "ok" })).into_response()
+        }
         Err(error) => {
             tracing::warn!(%error, username, "remote state report failed");
             (StatusCode::INTERNAL_SERVER_ERROR, "failed").into_response()
@@ -469,7 +500,21 @@ pub async fn remote_state_report_handler(
     }
 }
 
-/// App → state: read the bot's reported playback for the playbar.
+async fn fetch_remote_state(db: &sqlx::SqlitePool, username: &str) -> Option<RemoteStateRow> {
+    sqlx::query_as::<_, RemoteStateRow>(
+        "SELECT connected, track_id, title, artist, album, cover_art,
+                position_ms, duration_ms, is_playing, queue_json, updated_at_epoch, rev
+         FROM remote_state WHERE username = ?",
+    )
+    .bind(username)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten()
+}
+
+/// App → state: read the bot's reported playback for the playbar. With
+/// `wait=<secs>&since=<rev>` this long-polls until the state advances past `rev`.
 pub async fn remote_state_handler(
     State(state): State<AppState>,
     Query(params): Query<HashMap<String, String>>,
@@ -478,16 +523,18 @@ pub async fn remote_state_handler(
         Ok(auth) => auth,
         Err(response) => return response,
     };
-    let row = sqlx::query_as::<_, RemoteStateRow>(
-        "SELECT connected, track_id, title, artist, album, cover_art,
-                position_ms, duration_ms, is_playing, queue_json, updated_at_epoch
-         FROM remote_state WHERE username = ?",
-    )
-    .bind(&username)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten();
+    let since: i64 = params.get("since").and_then(|v| v.parse().ok()).unwrap_or(0);
+    let wait: u64 = params.get("wait").and_then(|v| v.parse().ok()).unwrap_or(0).min(30);
+
+    let waiters = state.remote_waiters(&username).await;
+    let notified = waiters.state.notified();
+    tokio::pin!(notified);
+    let mut row = fetch_remote_state(&state.db, &username).await;
+    let fresh = |r: &Option<RemoteStateRow>| r.as_ref().map(|x| x.rev).unwrap_or(0) > since;
+    if !fresh(&row) && wait > 0 {
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(wait), notified).await;
+        row = fetch_remote_state(&state.db, &username).await;
+    }
     let now = vtrack::epoch_secs();
     let response = match row {
         Some(r) => {
@@ -506,6 +553,7 @@ pub async fn remote_state_handler(
                     .queue_json
                     .and_then(|q| serde_json::from_str::<serde_json::Value>(&q).ok()),
                 updated_at: r.updated_at_epoch,
+                rev: r.rev,
             }
         }
         None => RemoteStateResponse {
@@ -568,6 +616,7 @@ struct RemoteStateRow {
     is_playing: i64,
     queue_json: Option<String>,
     updated_at_epoch: i64,
+    rev: i64,
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -584,6 +633,7 @@ struct RemoteStateResponse {
     is_playing: bool,
     queue: Option<serde_json::Value>,
     updated_at: i64,
+    rev: i64,
 }
 
 /// Ingest a pasted YouTube/Yandex/VK link into a virtual track, returning a

@@ -448,21 +448,33 @@ export function PlayerProvider({
     reportNowPlaying(session, current).catch(() => undefined);
   }, [current, session]);
 
-  // Remote: poll the bot's playback state while connected.
+  // Remote: long-poll the bot's playback state while connected, so the playbar
+  // reflects skips/track-changes near-instantly instead of on a slow interval.
   useEffect(() => {
     if (!remoteOn) return;
     let active = true;
-    const load = () =>
-      getRemoteState(session)
-        .then((state) => {
-          if (active) setRemoteState(state);
-        })
-        .catch(() => undefined);
-    load();
-    const id = window.setInterval(load, 1500);
+    const controller = new AbortController();
+    let since = 0;
+    (async () => {
+      while (active) {
+        try {
+          const state = await getRemoteState(session, {
+            wait: 25,
+            since,
+            signal: controller.signal,
+          });
+          if (!active) break;
+          since = state.rev;
+          setRemoteState(state);
+        } catch {
+          if (!active) break;
+          await new Promise((resolve) => setTimeout(resolve, 2000)); // backoff
+        }
+      }
+    })();
     return () => {
       active = false;
-      window.clearInterval(id);
+      controller.abort();
     };
   }, [remoteOn, session]);
 
@@ -557,6 +569,11 @@ export function PlayerProvider({
   }, [dispatchRemote]);
 
   const startWave = useCallback(async () => {
+    // Remote: let the bot run its own endless Wave (refills server-side).
+    if (remoteOnRef.current) {
+      dispatchRemote("wave");
+      return;
+    }
     // Use the batch prefetched at startup when available; fetch fresh after
     // it's consumed so repeated taps still get current recommendations.
     const prefetched = wavePrefetchRef.current;
@@ -567,10 +584,6 @@ export function PlayerProvider({
     }
     if (songs.length === 0) {
       throw new Error("Wave returned no tracks yet");
-    }
-    if (remoteOnRef.current) {
-      dispatchRemote("play", { tracks: songs.map(toRemoteTrack), startIndex: 0 });
-      return;
     }
     setIsWave(true);
     setShuffle(false);

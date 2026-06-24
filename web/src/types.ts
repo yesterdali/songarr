@@ -72,6 +72,8 @@ export type RemoteState = {
   queue: Song[];
   /** Server epoch seconds. */
   updatedAt: number;
+  /** Monotonic revision — pass back as `since` to long-poll for the next change. */
+  rev: number;
   /** Client Date.now() ms when received — used to interpolate position. */
   fetchedAt: number;
 };

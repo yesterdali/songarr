@@ -1,10 +1,10 @@
-//! Spotify-Connect-style remote control. The Songarr app writes commands; this
-//! background loop (one per process) polls each linked user's command queue via
-//! Songarr, drives songbird (join voice, play, pause, skip, seek), and reports
-//! playback state back to Songarr for the app's playbar. See
-//! `discord-remote-plan.md`. The bot has no inbound HTTP, so Songarr is the relay.
+//! Spotify-Connect-style remote control. One task per linked user **long-polls**
+//! that user's command queue via Songarr (so control is near-instant, not
+//! polled), drives songbird (join voice, play, pause, skip, prev, seek, endless
+//! recs), and reports playback state back to Songarr for the app's playbar. The
+//! bot has no inbound HTTP, so Songarr is the relay. See `discord-remote-plan.md`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,10 +13,15 @@ use serenity::{ChannelId, GuildId, UserId};
 use songbird::input::HttpRequest;
 use tokio::sync::Mutex;
 
-use crate::songarr::{RemoteCommand, SongarrClient, Track};
+use crate::songarr::{SongarrClient, Track};
 
-/// Display metadata for a queued track, kept so state reports can name what's
-/// playing (songbird only tracks opaque handle UUIDs).
+/// How long the command long-poll blocks server-side (< the client read timeout).
+const COMMAND_WAIT_SECS: u64 = 20;
+/// Cadence for state reports / wave refills while connected.
+const STATE_TICK_SECS: u64 = 5;
+/// Refill endless recs when the queue drops to this many tracks.
+const WAVE_REFILL_THRESHOLD: usize = 2;
+
 #[derive(Clone)]
 struct TrackMeta {
     id: String,
@@ -43,48 +48,81 @@ impl TrackMeta {
                 .map(|secs| (secs * 1000.0) as i64),
         })
     }
+
+    fn from_track(track: Track) -> TrackMeta {
+        TrackMeta {
+            id: track.id,
+            title: track.title,
+            artist: track.artist,
+            album: None,
+            cover_art: None,
+            duration_ms: None,
+        }
+    }
+
+    fn track(&self) -> Track {
+        Track { id: self.id.clone(), title: self.title.clone(), artist: self.artist.clone() }
+    }
 }
 
 #[derive(Default)]
 struct UserSession {
     last_seq: i64,
     guild_id: Option<GuildId>,
-    /// songbird handle UUID → metadata for the tracks we enqueued.
+    /// songbird handle UUID → metadata (for state reports).
     metas: HashMap<String, TrackMeta>,
+    /// Ordered list from the last play, so `prev` can step back.
+    tracks: Vec<TrackMeta>,
+    /// Endless recs mode: refill the queue when it runs low.
+    wave: bool,
 }
 
-/// Run the remote-control loop forever. Spawned once at startup.
-pub async fn run(
-    ctx: serenity::Context,
-    db: sqlx::SqlitePool,
-    http: reqwest::Client,
-    stream_http: reqwest::Client,
-) {
-    let mut sessions: HashMap<String, UserSession> = HashMap::new();
-    let mut ticker = tokio::time::interval(Duration::from_secs(1));
-    tracing::info!("remote-control loop started");
+/// Supervisor: spawn one long-poll task per linked user.
+pub async fn run(ctx: serenity::Context, db: sqlx::SqlitePool, http: reqwest::Client) {
+    tracing::info!("remote-control supervisor started");
+    let mut spawned: HashSet<String> = HashSet::new();
     loop {
-        ticker.tick().await;
-        let links = match crate::store::all_links(&db).await {
-            Ok(links) => links,
-            Err(error) => {
-                tracing::debug!(%error, "remote: listing links failed");
-                continue;
+        if let Ok(links) = crate::store::all_links(&db).await {
+            for (discord_id, link) in links {
+                if spawned.insert(link.username.clone()) {
+                    tokio::spawn(user_loop(ctx.clone(), discord_id, link, http.clone()));
+                }
             }
-        };
-        for (discord_id, link) in links {
-            let client = SongarrClient::new(&http, &link);
-            let session = sessions
-                .entry(link.username.clone())
-                .or_insert_with(UserSession::default);
+        }
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+}
 
-            let commands = client.remote_commands(session.last_seq).await.unwrap_or_default();
-            for command in &commands {
-                handle_command(&ctx, &client, &stream_http, discord_id, session, command).await;
-                session.last_seq = command.seq.max(session.last_seq);
+async fn user_loop(
+    ctx: serenity::Context,
+    discord_id: u64,
+    link: crate::store::Link,
+    http: reqwest::Client,
+) {
+    let client = SongarrClient::new(&http, &link);
+    let mut session = UserSession::default();
+    loop {
+        let connected = session.guild_id.is_some();
+        tokio::select! {
+            result = client.remote_commands(session.last_seq, COMMAND_WAIT_SECS) => {
+                match result {
+                    Ok(commands) => {
+                        let had = !commands.is_empty();
+                        for command in &commands {
+                            handle_command(&ctx, &client, &http, discord_id, &mut session, command)
+                                .await;
+                            session.last_seq = command.seq.max(session.last_seq);
+                        }
+                        if had && session.guild_id.is_some() {
+                            report_state(&ctx, &client, &session).await;
+                        }
+                    }
+                    Err(_) => tokio::time::sleep(Duration::from_secs(2)).await,
+                }
             }
-            if session.guild_id.is_some() {
-                report_state(&ctx, &client, session).await;
+            _ = tokio::time::sleep(Duration::from_secs(STATE_TICK_SECS)), if connected => {
+                refill_if_low(&ctx, &client, &http, &mut session).await;
+                report_state(&ctx, &client, &session).await;
             }
         }
     }
@@ -93,21 +131,21 @@ pub async fn run(
 async fn handle_command(
     ctx: &serenity::Context,
     client: &SongarrClient<'_>,
-    stream_http: &reqwest::Client,
+    http: &reqwest::Client,
     discord_id: u64,
     session: &mut UserSession,
-    command: &RemoteCommand,
+    command: &crate::songarr::RemoteCommand,
 ) {
     match command.action.as_str() {
-        "connect" => {
-            connect(ctx, discord_id, session).await;
-        }
+        "connect" => connect(ctx, discord_id, session).await,
         "disconnect" => {
             if let Some(guild_id) = session.guild_id.take() {
                 if let Some(manager) = songbird::get(ctx).await {
                     let _ = manager.remove(guild_id).await;
                 }
                 session.metas.clear();
+                session.tracks.clear();
+                session.wave = false;
                 let _ = client
                     .remote_report_state(
                         &serde_json::json!({ "connected": false, "isPlaying": false }),
@@ -119,7 +157,28 @@ async fn handle_command(
             if session.guild_id.is_none() {
                 connect(ctx, discord_id, session).await;
             }
-            play(ctx, stream_http, client, session, &command.payload).await;
+            let tracks = command
+                .payload
+                .get("tracks")
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(TrackMeta::from_json).collect())
+                .unwrap_or_default();
+            let start = command.payload.get("startIndex").and_then(|v| v.as_u64()).unwrap_or(0)
+                as usize;
+            play_tracks(ctx, http, client, session, tracks, start, false).await;
+        }
+        "wave" => {
+            if session.guild_id.is_none() {
+                connect(ctx, discord_id, session).await;
+            }
+            let tracks: Vec<TrackMeta> = client
+                .wave_next(None, 12)
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .map(TrackMeta::from_track)
+                .collect();
+            play_tracks(ctx, http, client, session, tracks, 0, true).await;
         }
         "pause" => {
             if let Some(call) = current_call(ctx, session).await {
@@ -136,13 +195,7 @@ async fn handle_command(
                 let _ = call.lock().await.queue().skip();
             }
         }
-        "prev" => {
-            // No native previous in songbird (Phase 2 adds a history stack); for
-            // now restart the current track.
-            if let Some(handle) = current_handle(ctx, session).await {
-                let _ = handle.seek(Duration::from_millis(0));
-            }
-        }
+        "prev" => prev(ctx, http, client, session).await,
         "seek" => {
             if let Some(ms) = command.payload.get("positionMs").and_then(|v| v.as_i64()) {
                 if let Some(handle) = current_handle(ctx, session).await {
@@ -168,42 +221,107 @@ async fn connect(ctx: &serenity::Context, discord_id: u64, session: &mut UserSes
     }
 }
 
-async fn play(
+async fn play_tracks(
     ctx: &serenity::Context,
-    stream_http: &reqwest::Client,
+    http: &reqwest::Client,
     client: &SongarrClient<'_>,
     session: &mut UserSession,
-    payload: &serde_json::Value,
+    tracks: Vec<TrackMeta>,
+    start: usize,
+    wave: bool,
 ) {
     let Some(call) = current_call(ctx, session).await else {
         return;
     };
-    let tracks = payload.get("tracks").and_then(|v| v.as_array()).cloned().unwrap_or_default();
-    let start = payload.get("startIndex").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-
-    // Replace whatever was playing.
-    {
-        let handler = call.lock().await;
-        handler.queue().stop();
-    }
+    call.lock().await.queue().stop(); // clear whatever was playing
     session.metas.clear();
-
-    for value in tracks.iter().skip(start) {
-        let Some(meta) = TrackMeta::from_json(value) else {
-            continue;
-        };
-        let url = client.stream_url(&Track {
-            id: meta.id.clone(),
-            title: meta.title.clone(),
-            artist: meta.artist.clone(),
-        });
-        let input = HttpRequest::new(stream_http.clone(), url);
-        let handle = {
-            let mut handler = call.lock().await;
-            handler.enqueue_input(input.into()).await
-        };
-        session.metas.insert(handle.uuid().to_string(), meta);
+    session.tracks = tracks.clone();
+    session.wave = wave;
+    for meta in tracks.iter().skip(start) {
+        if let Some(uuid) = enqueue_meta(&call, http, client, meta).await {
+            session.metas.insert(uuid, meta.clone());
+        }
     }
+}
+
+/// `prev`: restart the current track if >3s in, else step to the previous track
+/// (re-enqueue the ordered list from there). songbird has no native previous.
+async fn prev(
+    ctx: &serenity::Context,
+    http: &reqwest::Client,
+    client: &SongarrClient<'_>,
+    session: &mut UserSession,
+) {
+    let Some(handle) = current_handle(ctx, session).await else {
+        return;
+    };
+    let position = handle.get_info().await.map(|info| info.position).unwrap_or_default();
+    let current_id = session.metas.get(&handle.uuid().to_string()).map(|m| m.id.clone());
+    if position > Duration::from_secs(3) {
+        let _ = handle.seek(Duration::ZERO);
+        return;
+    }
+    let target = current_id
+        .as_ref()
+        .and_then(|id| session.tracks.iter().position(|t| &t.id == id))
+        .filter(|&i| i > 0)
+        .map(|i| i - 1);
+    match target {
+        Some(index) => {
+            let tracks = session.tracks.clone();
+            let wave = session.wave;
+            play_tracks(ctx, http, client, session, tracks, index, wave).await;
+        }
+        None => {
+            let _ = handle.seek(Duration::ZERO);
+        }
+    }
+}
+
+/// Endless recs: top up the queue from Wave when it runs low.
+async fn refill_if_low(
+    ctx: &serenity::Context,
+    client: &SongarrClient<'_>,
+    http: &reqwest::Client,
+    session: &mut UserSession,
+) {
+    if !session.wave {
+        return;
+    }
+    let Some(call) = current_call(ctx, session).await else {
+        return;
+    };
+    let remaining = call.lock().await.queue().len();
+    if remaining > WAVE_REFILL_THRESHOLD {
+        return;
+    }
+    let seed = session.tracks.last().map(|t| t.id.clone());
+    let fresh = client.wave_next(seed.as_deref(), 12).await.unwrap_or_default();
+    for track in fresh {
+        let meta = TrackMeta::from_track(track);
+        if session.tracks.iter().any(|t| t.id == meta.id) {
+            continue;
+        }
+        if let Some(uuid) = enqueue_meta(&call, http, client, &meta).await {
+            session.metas.insert(uuid, meta.clone());
+            session.tracks.push(meta);
+        }
+    }
+}
+
+async fn enqueue_meta(
+    call: &Arc<Mutex<songbird::Call>>,
+    http: &reqwest::Client,
+    client: &SongarrClient<'_>,
+    meta: &TrackMeta,
+) -> Option<String> {
+    let url = client.stream_url(&meta.track());
+    let input = HttpRequest::new(http.clone(), url);
+    let handle = {
+        let mut handler = call.lock().await;
+        handler.enqueue_input(input.into()).await
+    };
+    Some(handle.uuid().to_string())
 }
 
 async fn report_state(ctx: &serenity::Context, client: &SongarrClient<'_>, session: &UserSession) {
@@ -277,8 +395,7 @@ async fn current_handle(
     handle
 }
 
-/// Find which guild/voice-channel a Discord user is currently in (from the
-/// gateway cache). Returns the first match.
+/// Find which guild/voice-channel a Discord user is currently in (gateway cache).
 fn find_voice_channel(ctx: &serenity::Context, user: UserId) -> Option<(GuildId, ChannelId)> {
     for guild_id in ctx.cache.guilds() {
         if let Some(guild) = ctx.cache.guild(guild_id) {

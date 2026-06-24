@@ -71,20 +71,15 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let test_guild = config.test_guild;
-    // Clones for the remote-control loop (data is moved into setup below).
+    // Clones for the remote-control loop (data is moved into setup below). The
+    // long-poll needs the no-total-timeout client so a 20s wait doesn't abort.
     let remote_db = data.db.clone();
-    let remote_http = data.http.clone();
-    let remote_stream_http = data.stream_http.clone();
+    let remote_http = data.stream_http.clone();
     let framework = poise::Framework::builder()
         .options(options)
         .setup(move |ctx, ready, framework| {
             Box::pin(async move {
-                tokio::spawn(remote::run(
-                    ctx.clone(),
-                    remote_db,
-                    remote_http,
-                    remote_stream_http,
-                ));
+                tokio::spawn(remote::run(ctx.clone(), remote_db, remote_http));
                 let count = framework.options().commands.len();
                 match test_guild {
                     Some(id) => {

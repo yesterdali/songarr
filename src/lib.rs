@@ -49,7 +49,18 @@ pub struct AppState {
     /// Tracks artist expansion prewarms currently in flight (dedup across
     /// streams/scrobbles/discovery generation).
     pub artist_prewarm_inflight: Arc<tokio::sync::Mutex<std::collections::HashSet<String>>>,
+    /// Per-user notify pair for remote-control long-polling (commands + state),
+    /// so app↔bot control is push-like instead of polled.
+    pub remote_waiters:
+        Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<RemoteWaiters>>>>,
     envelope_cache: Arc<tokio::sync::OnceCell<Envelope>>,
+}
+
+/// Wakeups for a user's remote-control long-polls.
+#[derive(Default)]
+pub struct RemoteWaiters {
+    pub commands: tokio::sync::Notify,
+    pub state: tokio::sync::Notify,
 }
 
 impl AppState {
@@ -80,8 +91,15 @@ impl AppState {
             artist_prewarm_inflight: Arc::new(tokio::sync::Mutex::new(
                 std::collections::HashSet::new(),
             )),
+            remote_waiters: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             envelope_cache: Arc::new(tokio::sync::OnceCell::new()),
         })
+    }
+
+    /// Get-or-create the notify pair for a user's remote-control long-polls.
+    pub async fn remote_waiters(&self, username: &str) -> Arc<RemoteWaiters> {
+        let mut map = self.remote_waiters.lock().await;
+        map.entry(username.to_string()).or_default().clone()
     }
 
     /// Envelope attributes for synthesized responses, mirrored from a real
