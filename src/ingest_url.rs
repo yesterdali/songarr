@@ -228,20 +228,14 @@ async fn vk_virtual(state: &AppState, track_id: &str) -> anyhow::Result<Ingested
         crate::vk::available(&state.config.vk),
         "VK Music is not enabled on this server"
     );
+    // Fail loudly rather than create a placeholder track: a placeholder would
+    // later fall back to a YouTube search on a garbage query ("VK track <id>")
+    // and play a random song. A clear error is far better UX.
+    let meta = crate::vk::track_meta(&state.config.vk, track_id)
+        .await
+        .map_err(|error| anyhow!("couldn't read that VK track: {error}"))?;
     let (artist, title, album, duration_ms, artwork_url) =
-        match crate::vk::track_meta(&state.config.vk, track_id).await {
-            Ok(t) => (t.artist, t.title, t.album, t.duration_ms, t.artwork_url),
-            Err(error) => {
-                tracing::warn!(%error, track_id, "VK metadata lookup failed; using placeholder");
-                (
-                    "Unknown artist".to_string(),
-                    format!("VK track {track_id}"),
-                    None,
-                    None,
-                    None,
-                )
-            }
-        };
+        (meta.artist, meta.title, meta.album, meta.duration_ms, meta.artwork_url);
     let catalog = CatalogTrack {
         provider: crate::vk::PROVIDER,
         provider_track_id: track_id.to_string(),

@@ -33,6 +33,12 @@ except Exception as exc:  # pragma: no cover - exercised in deployment, not test
 # `audio` scope third-party clients need.
 KATE_APP_ID = 2685278
 KATE_CLIENT_SECRET = "hHbZxrka2uZ6jB1inYsH"
+# VK gates the audio.* methods on the Kate Mobile User-Agent too: without it,
+# audio.getById fails with "[3] Unknown method passed" even on a valid token.
+KATE_USER_AGENT = (
+    "KateMobileAndroid/56 lite-460 (Android 4.4.2; SDK 19; x86; "
+    "unknown Android SDK built for x86; en)"
+)
 
 
 def read_payload() -> dict[str, Any]:
@@ -45,6 +51,7 @@ def api_from_payload(payload: dict[str, Any]) -> Any:
     if not token:
         fail("accessToken is required")
     session = vk_api.VkApi(token=token, api_version="5.131")
+    session.http.headers["User-Agent"] = KATE_USER_AGENT
     return session.get_api()
 
 
@@ -130,6 +137,7 @@ def cmd_login(payload: dict[str, Any]) -> None:
         api_version="5.131",
         auth_handler=two_factor,
     )
+    session.http.headers["User-Agent"] = KATE_USER_AGENT
     session.auth(token_only=True)
     token = session.token.get("access_token")
     if not token:
