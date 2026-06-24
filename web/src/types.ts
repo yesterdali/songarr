@@ -53,3 +53,11 @@ export type LyricsResult = {
   synced: boolean;
   lines: LyricsLine[];
 };
+
+// A friend's most-recent play (Spotify-style Friend Activity).
+export type FriendActivity = {
+  username: string;
+  song: Song;
+  /** Unix epoch seconds of the play. */
+  updatedAt: number;
+};

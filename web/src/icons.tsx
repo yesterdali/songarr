@@ -160,3 +160,65 @@ export function ChevronLeftIcon({ className = "" }: IconProps) {
     </svg>
   );
 }
+
+const strokeProps = {
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round",
+  strokeLinejoin: "round",
+} as const;
+
+export function ShuffleIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...strokeProps} className={className}>
+      <path d="M2 18h1.4c1.3 0 2.5-.6 3.3-1.7l6.1-8.6c.8-1.1 2-1.7 3.3-1.7H22" />
+      <path d="m18 2 4 4-4 4" />
+      <path d="M2 6h1.9c1.5 0 2.9.9 3.6 2.2" />
+      <path d="M22 18h-5.9c-1.3 0-2.6-.7-3.3-1.8l-.5-.8" />
+      <path d="m18 14 4 4-4 4" />
+    </svg>
+  );
+}
+
+export function RepeatIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...strokeProps} className={className}>
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+    </svg>
+  );
+}
+
+export function RepeatOneIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...strokeProps} className={className}>
+      <path d="m17 2 4 4-4 4" />
+      <path d="M3 11v-1a4 4 0 0 1 4-4h14" />
+      <path d="m7 22-4-4 4-4" />
+      <path d="M21 13v1a4 4 0 0 1-4 4H3" />
+      <path d="M11 10.5 12.5 10v4" />
+    </svg>
+  );
+}
+
+export function DownloadIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...strokeProps} className={className}>
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5" />
+      <path d="M12 15V3" />
+    </svg>
+  );
+}
+
+export function DownloadDoneIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...strokeProps} className={className}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="m8.3 12 2.6 2.6 4.8-5.2" />
+    </svg>
+  );
+}

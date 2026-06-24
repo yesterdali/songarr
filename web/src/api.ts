@@ -4,7 +4,7 @@
 // the same plain Subsonic calls surface external content for free.
 
 import { apiUrl, authQuery, type WaveSession } from "./auth";
-import type { Album, Artist, LyricsResult, Playlist, Song } from "./types";
+import type { Album, Artist, FriendActivity, LyricsResult, Playlist, Song } from "./types";
 
 const ARTIST_COVER_CACHE_VERSION = "songarr.wave.artistCovers.v1";
 
@@ -456,4 +456,49 @@ export async function waveFeedback(
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
+}
+
+// ---- Friend Activity ----
+
+/** Tell the server what the user is now playing (fire-and-forget). */
+export async function reportNowPlaying(session: WaveSession, song: Song): Promise<void> {
+  const response = await fetch(
+    apiUrl(session, `/wave/api/now-playing?${authQuery(session)}`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        album: song.album ?? null,
+        coverArt: song.coverArt ?? null,
+      }),
+    },
+  );
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+type RawFriend = {
+  username: string;
+  id: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  coverArt?: string;
+  updatedAt?: number;
+};
+
+/** What everyone else on the instance is listening to. */
+export async function getFriends(session: WaveSession): Promise<FriendActivity[]> {
+  const response = await fetch(apiUrl(session, `/wave/api/friends?${authQuery(session)}`), {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = (await response.json()) as { friends?: RawFriend[] };
+  return (body.friends ?? []).map((raw) => ({
+    username: raw.username,
+    song: toSong(raw),
+    updatedAt: raw.updatedAt ?? 0,
+  }));
 }

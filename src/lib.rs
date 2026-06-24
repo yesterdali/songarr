@@ -163,6 +163,11 @@ pub fn build_app(state: AppState) -> Router {
             "/wave/api/ingest",
             axum::routing::post(proxy::wave::ingest_handler),
         )
+        .route(
+            "/wave/api/now-playing",
+            axum::routing::post(proxy::wave::now_playing_handler),
+        )
+        .route("/wave/api/friends", get(proxy::wave::friends_handler))
         .route("/wave/{*path}", get(proxy::wave::asset));
     let router = intercept!(router, "search2", proxy::search::search2_handler);
     let router = intercept!(router, "search3", proxy::search::search3_handler);

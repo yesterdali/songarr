@@ -8,18 +8,11 @@ import {
   validateSession,
   type WaveSession,
 } from "./auth";
-import { Cover, NowPlayingBar, NowPlayingScreen } from "./components";
-import {
-  LibraryIcon,
-  NextIcon,
-  PauseIcon,
-  PlayIcon,
-  PlaylistIcon,
-  SearchIcon,
-  WaveIcon,
-} from "./icons";
+import { FriendsPanel, NowPlayingBar, NowPlayingScreen, PlayBar } from "./components";
+import { LibraryIcon, PlaylistIcon, SearchIcon, WaveIcon } from "./icons";
+import { DownloadsProvider } from "./downloads";
 import { NavProvider, useNav, type Route, type TabName } from "./nav";
-import { formatTime, PlayerProvider, usePlayer } from "./player";
+import { PlayerProvider } from "./player";
 import {
   AlbumsView,
   AlbumView,
@@ -226,84 +219,6 @@ function DesktopSidebar({
   );
 }
 
-function DesktopNowPlayingRail({ onOpen }: { onOpen: () => void }) {
-  const { current, isPlaying, currentTime, duration, toggle, next } = usePlayer();
-  if (!current) {
-    return (
-      <aside className="hidden border-l border-wave-pink/10 px-5 py-6 xl:block">
-        <div className="sticky top-6 rounded-xl border border-white/10 bg-white/[0.035] p-5 text-center text-sm font-semibold text-neutral-500">
-          Музыка появится здесь, когда начнется воспроизведение.
-        </div>
-      </aside>
-    );
-  }
-  const displayDuration = duration || current.duration || 0;
-  const progress = displayDuration
-    ? Math.min((currentTime / displayDuration) * 100, 100)
-    : 0;
-  return (
-    <aside className="hidden border-l border-wave-pink/10 px-5 py-6 xl:block">
-      <div className="sticky top-6">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="group w-full rounded-xl border border-white/10 bg-white/[0.04] p-4 text-left shadow-2xl shadow-black/20 transition hover:bg-white/[0.06]"
-        >
-          <p className="mb-3 text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">
-            Сейчас играет
-          </p>
-          <Cover
-            coverArt={current.coverArt}
-            size={360}
-            placeholderSize={80}
-            rounded="rounded-xl"
-            className="aspect-square w-full shadow-xl shadow-black/30 ring-1 ring-white/10"
-          />
-          <h2 className="mt-4 truncate text-xl font-extrabold tracking-tight">
-            {current.title}
-          </h2>
-          <p className="truncate text-sm font-semibold text-neutral-400">{current.artist}</p>
-        </button>
-
-        <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.035] p-4">
-          <div className="h-1 overflow-hidden rounded-full bg-white/10">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-wave-orange to-wave-pink transition-[width] duration-500 ease-out"
-              style={{ width: `${progress}%` }}
-            />
-          </div>
-          <div className="mt-2 flex justify-between text-xs font-semibold text-neutral-500">
-            <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(displayDuration)}</span>
-          </div>
-          <div className="mt-4 flex items-center justify-center gap-4">
-            <button
-              type="button"
-              aria-label={isPlaying ? "pause" : "play"}
-              onClick={toggle}
-              className="grid h-12 w-12 place-items-center rounded-full bg-[#f3ecdd] text-neutral-950 shadow-lg shadow-black/20 transition active:scale-95"
-            >
-              {isPlaying ? (
-                <PauseIcon className="h-6 w-6" />
-              ) : (
-                <PlayIcon className="ml-0.5 h-6 w-6" />
-              )}
-            </button>
-            <button
-              type="button"
-              aria-label="next"
-              onClick={next}
-              className="grid h-11 w-11 place-items-center rounded-full border border-white/10 text-neutral-300 transition hover:bg-white/[0.06] active:scale-95"
-            >
-              <NextIcon className="h-5 w-5" />
-            </button>
-          </div>
-        </div>
-      </div>
-    </aside>
-  );
-}
-
 function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => void }) {
   const [stack, setStack] = useState<Route[]>([{ name: "home" }]);
   const [npOpen, setNpOpen] = useState(false);
@@ -319,13 +234,14 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
   };
 
   return (
-    <PlayerProvider session={session}>
+    <DownloadsProvider session={session}>
+      <PlayerProvider session={session}>
       <NavProvider value={nav}>
         <div className="min-h-dvh">
           <div className="mx-auto grid min-h-dvh w-full max-w-[1500px] lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)_340px]">
             <DesktopSidebar activeTab={activeTab} session={session} onLogout={onLogout} />
 
-            <main className="min-w-0 px-5 pb-44 pt-6 md:px-8 lg:pb-10 lg:pt-8 xl:px-10">
+            <main className="min-w-0 px-5 pb-44 pt-6 md:px-8 lg:pb-28 lg:pt-8 xl:px-10">
               <div className="mx-auto w-full max-w-md md:max-w-3xl lg:max-w-5xl">
                 {route.name === "home" && (
                   <header className="mb-6 flex items-center gap-3 lg:hidden">
@@ -350,7 +266,12 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
               </div>
             </main>
 
-            <DesktopNowPlayingRail onOpen={() => setNpOpen(true)} />
+            <FriendsPanel />
+          </div>
+
+          {/* Desktop: persistent bottom playbar (Spotify/Flutter style). */}
+          <div className="fixed inset-x-0 bottom-0 z-20">
+            <PlayBar onOpen={() => setNpOpen(true)} />
           </div>
 
           {/* Bottom chrome: floating dock with the now-playing bar above the tab bar */}
@@ -387,7 +308,8 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
           {npOpen && <NowPlayingScreen onClose={() => setNpOpen(false)} />}
         </div>
       </NavProvider>
-    </PlayerProvider>
+      </PlayerProvider>
+    </DownloadsProvider>
   );
 }
 

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import {
   BanIcon,
   ChevronLeftIcon,
+  DownloadDoneIcon,
+  DownloadIcon,
   HeartIcon,
   LyricsIcon,
   MusicNoteIcon,
@@ -10,11 +12,88 @@ import {
   PlayIcon,
   PrevIcon,
   QueueIcon,
+  RepeatIcon,
+  RepeatOneIcon,
+  ShuffleIcon,
 } from "./icons";
-import { getLyrics } from "./api";
+import { getFriends, getLyrics } from "./api";
+import { useDownloads } from "./downloads";
 import { useNav } from "./nav";
 import { formatTime, usePlayer } from "./player";
-import type { LyricsResult, Song } from "./types";
+import type { FriendActivity, LyricsResult, Song } from "./types";
+
+function Spinner({ className = "h-5 w-5" }: { className?: string }) {
+  return (
+    <span
+      className={`inline-block animate-spin rounded-full border-2 border-wave-pink/30 border-t-wave-pink ${className}`}
+    />
+  );
+}
+
+/** Per-track offline download toggle: download → spinner → green check. */
+export function DownloadButton({
+  song,
+  className = "",
+  size = "h-5 w-5",
+}: {
+  song: Song;
+  className?: string;
+  size?: string;
+}) {
+  const { isDownloaded, isDownloading, toggle } = useDownloads();
+  const done = isDownloaded(song.id);
+  const busy = isDownloading(song.id);
+  return (
+    <button
+      type="button"
+      aria-label={done ? "remove download" : "download"}
+      onClick={() => toggle(song)}
+      disabled={busy}
+      className={`grid place-items-center transition-transform active:scale-90 ${
+        done ? "text-green-500" : "text-neutral-400 dark:text-neutral-500"
+      } ${className}`}
+    >
+      {busy ? (
+        <Spinner className={size} />
+      ) : done ? (
+        <DownloadDoneIcon className={size} />
+      ) : (
+        <DownloadIcon className={size} />
+      )}
+    </button>
+  );
+}
+
+/** Album/playlist "download everything" pill with progress + remove-all. */
+export function DownloadAllButton({ songs }: { songs: Song[] }) {
+  const { isDownloading, downloadAlbum, downloadedCount, remove } = useDownloads();
+  const ids = songs.map((song) => song.id);
+  const done = downloadedCount(ids);
+  const total = songs.length;
+  const allDone = total > 0 && done === total;
+  const busy = songs.some((song) => isDownloading(song.id));
+  return (
+    <button
+      type="button"
+      disabled={total === 0 || busy}
+      onClick={() => (allDone ? ids.forEach((id) => remove(id)) : downloadAlbum(songs))}
+      className={`inline-flex items-center gap-2 rounded-full border px-4 py-2.5 font-bold transition active:scale-95 disabled:opacity-60 ${
+        allDone
+          ? "border-green-500/30 bg-green-500/10 text-green-600 dark:text-green-400"
+          : "border-black/10 bg-black/[0.03] text-neutral-700 dark:border-white/15 dark:bg-white/5 dark:text-neutral-200"
+      }`}
+    >
+      {busy ? (
+        <Spinner className="h-5 w-5" />
+      ) : allDone ? (
+        <DownloadDoneIcon className="h-5 w-5" />
+      ) : (
+        <DownloadIcon className="h-5 w-5" />
+      )}
+      <span>{busy ? `${done}/${total}` : allDone ? "Скачано" : "Скачать"}</span>
+    </button>
+  );
+}
 
 export function Cover({
   coverArt,
@@ -170,6 +249,7 @@ export function SongRow({
           </span>
         </span>
       </button>
+      <DownloadButton song={song} className="h-8 w-8 shrink-0" />
       <button
         type="button"
         aria-label="like"
@@ -429,10 +509,14 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
     isPlaying,
     currentTime,
     duration,
+    repeat,
+    shuffle,
     toggle,
     next,
     prev,
     seek,
+    cycleRepeat,
+    toggleShuffle,
     isStarred,
     toggleStar,
     dislikeCurrent,
@@ -557,6 +641,7 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
               </button>
             )}
           </div>
+          <DownloadButton song={current} className="h-7 w-7" size="h-7 w-7" />
           <button
             type="button"
             aria-label="like"
@@ -590,7 +675,18 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           </div>
         </div>
 
-        <div className="mt-4 flex items-center justify-center gap-9">
+        <div className="mt-4 flex items-center justify-center gap-6">
+          <button
+            type="button"
+            aria-label="shuffle"
+            aria-pressed={shuffle}
+            onClick={toggleShuffle}
+            className={`transition-transform active:scale-90 ${
+              shuffle ? "text-wave-pink" : "text-white/60"
+            }`}
+          >
+            <ShuffleIcon className="h-6 w-6" />
+          </button>
           <button
             type="button"
             aria-label="previous"
@@ -619,6 +715,20 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           >
             <NextIcon className="h-9 w-9" />
           </button>
+          <button
+            type="button"
+            aria-label={`repeat ${repeat}`}
+            onClick={cycleRepeat}
+            className={`transition-transform active:scale-90 ${
+              repeat === "off" ? "text-white/60" : "text-wave-pink"
+            }`}
+          >
+            {repeat === "one" ? (
+              <RepeatOneIcon className="h-6 w-6" />
+            ) : (
+              <RepeatIcon className="h-6 w-6" />
+            )}
+          </button>
         </div>
 
         <div className="mt-5 flex justify-center">
@@ -646,6 +756,230 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           seek={seek}
         />
       )}
+    </div>
+  );
+}
+
+function timeAgo(epochSecs: number): string {
+  if (!epochSecs) return "";
+  const diff = Math.max(0, Math.floor(Date.now() / 1000) - epochSecs);
+  if (diff < 60) return "только что";
+  if (diff < 3600) return `${Math.floor(diff / 60)} мин назад`;
+  if (diff < 86_400) return `${Math.floor(diff / 3600)} ч назад`;
+  return `${Math.floor(diff / 86_400)} дн назад`;
+}
+
+/** Right-side Friend Activity feed: what everyone else is listening to. Tap a
+ *  row to play that track. (For now every account on the instance is a friend.) */
+export function FriendsPanel() {
+  const { session, playQueue } = usePlayer();
+  const [friends, setFriends] = useState<FriendActivity[]>([]);
+  useEffect(() => {
+    let active = true;
+    const load = () =>
+      getFriends(session)
+        .then((list) => {
+          if (active) setFriends(list);
+        })
+        .catch(() => undefined);
+    load();
+    const id = window.setInterval(load, 45_000);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [session]);
+
+  return (
+    <aside className="hidden border-l border-wave-pink/10 px-5 py-6 xl:block">
+      <div className="sticky top-6">
+        <h2 className="mb-4 text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">
+          Чем заняты друзья
+        </h2>
+        {friends.length === 0 ? (
+          <p className="rounded-xl border border-white/10 bg-white/[0.035] p-4 text-sm font-semibold text-neutral-500">
+            Пока тихо. Когда друзья что-то слушают, это появится здесь.
+          </p>
+        ) : (
+          <div className="space-y-1">
+            {friends.map((friend) => (
+              <button
+                key={friend.username}
+                type="button"
+                onClick={() => playQueue([friend.song], 0)}
+                className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-white/[0.05] active:scale-[0.99]"
+              >
+                <span className="relative shrink-0">
+                  <Cover
+                    coverArt={friend.song.coverArt}
+                    size={80}
+                    rounded="rounded-lg"
+                    className="h-11 w-11 ring-1 ring-white/10"
+                  />
+                  <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-gradient-to-br from-wave-orange to-wave-violet text-[10px] font-bold text-white ring-2 ring-[#0d070b]">
+                    {friend.username.slice(0, 1).toUpperCase()}
+                  </span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold text-[#f3ecdd]">
+                    {friend.username}
+                  </span>
+                  <span className="block truncate text-xs text-neutral-400">
+                    {friend.song.title} · {friend.song.artist}
+                  </span>
+                  <span className="block truncate text-[11px] text-neutral-500">
+                    {timeAgo(friend.updatedAt)}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+/** Persistent desktop bottom playbar (Spotify/Flutter style): track + controls
+ *  + progress. Tap the cover/title to open the full-screen player. */
+export function PlayBar({ onOpen }: { onOpen: () => void }) {
+  const {
+    current,
+    isPlaying,
+    currentTime,
+    duration,
+    repeat,
+    shuffle,
+    toggle,
+    next,
+    prev,
+    seek,
+    cycleRepeat,
+    toggleShuffle,
+    isStarred,
+    toggleStar,
+  } = usePlayer();
+  if (!current) return null;
+  const displayDuration = duration || current.duration || 0;
+  const displayTime = displayDuration ? Math.min(currentTime, displayDuration) : currentTime;
+  const progress = displayDuration ? Math.min((displayTime / displayDuration) * 100, 100) : 0;
+  return (
+    <div className="hidden border-t border-wave-pink/15 bg-[#0d070b]/95 px-4 py-2.5 text-white backdrop-blur-2xl lg:block">
+      <div className="mx-auto grid max-w-[1500px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4">
+        {/* Left: track */}
+        <div className="flex min-w-0 items-center gap-3">
+          <button type="button" onClick={onOpen} aria-label="open player" className="shrink-0">
+            <Cover
+              coverArt={current.coverArt}
+              size={120}
+              rounded="rounded-lg"
+              className="h-14 w-14 shadow-md ring-1 ring-white/10"
+            />
+          </button>
+          <button type="button" onClick={onOpen} className="min-w-0 flex-1 text-left">
+            <span className="block truncate text-sm font-bold text-[#f3ecdd]">
+              {current.title}
+            </span>
+            <span className="block truncate text-xs font-semibold text-neutral-400">
+              {current.artist}
+            </span>
+          </button>
+          <button
+            type="button"
+            aria-label="like"
+            onClick={() => toggleStar(current.id)}
+            className={`shrink-0 transition-transform active:scale-90 ${
+              isStarred(current.id) ? "text-wave-pink" : "text-neutral-400"
+            }`}
+          >
+            <HeartIcon className="h-5 w-5" filled={isStarred(current.id)} />
+          </button>
+        </div>
+
+        {/* Center: controls + progress */}
+        <div className="flex w-[min(42vw,560px)] flex-col items-center gap-1">
+          <div className="flex items-center gap-5">
+            <button
+              type="button"
+              aria-label="shuffle"
+              aria-pressed={shuffle}
+              onClick={toggleShuffle}
+              className={`transition active:scale-90 ${
+                shuffle ? "text-wave-pink" : "text-neutral-400 hover:text-neutral-200"
+              }`}
+            >
+              <ShuffleIcon className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              aria-label="previous"
+              onClick={prev}
+              className="text-neutral-200 transition active:scale-90 hover:text-white"
+            >
+              <PrevIcon className="h-6 w-6" />
+            </button>
+            <button
+              type="button"
+              aria-label={isPlaying ? "pause" : "play"}
+              onClick={toggle}
+              className="grid h-10 w-10 place-items-center rounded-full bg-[#f3ecdd] text-neutral-950 shadow-md transition active:scale-95"
+            >
+              {isPlaying ? (
+                <PauseIcon className="h-5 w-5" />
+              ) : (
+                <PlayIcon className="ml-0.5 h-5 w-5" />
+              )}
+            </button>
+            <button
+              type="button"
+              aria-label="next"
+              onClick={next}
+              className="text-neutral-200 transition active:scale-90 hover:text-white"
+            >
+              <NextIcon className="h-6 w-6" />
+            </button>
+            <button
+              type="button"
+              aria-label={`repeat ${repeat}`}
+              onClick={cycleRepeat}
+              className={`transition active:scale-90 ${
+                repeat === "off" ? "text-neutral-400 hover:text-neutral-200" : "text-wave-pink"
+              }`}
+            >
+              {repeat === "one" ? (
+                <RepeatOneIcon className="h-5 w-5" />
+              ) : (
+                <RepeatIcon className="h-5 w-5" />
+              )}
+            </button>
+          </div>
+          <div className="flex w-full items-center gap-2 text-[11px] font-semibold text-neutral-500">
+            <span className="w-9 text-right tabular-nums">{formatTime(displayTime)}</span>
+            <div className="flex-1">
+              <SeekBar
+                duration={displayDuration}
+                currentTime={displayTime}
+                progress={progress}
+                seek={seek}
+              />
+            </div>
+            <span className="w-9 tabular-nums">{formatTime(displayDuration)}</span>
+          </div>
+        </div>
+
+        {/* Right: download + open */}
+        <div className="flex items-center justify-end gap-2">
+          <DownloadButton song={current} className="h-9 w-9" />
+          <button
+            type="button"
+            aria-label="now playing"
+            onClick={onOpen}
+            className="grid h-9 w-9 place-items-center rounded-full text-neutral-300 transition hover:bg-white/[0.06] hover:text-white"
+          >
+            <QueueIcon className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

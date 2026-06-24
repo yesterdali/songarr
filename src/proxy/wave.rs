@@ -191,6 +191,127 @@ pub async fn feedback_handler(
     }
 }
 
+/// Record the caller's current track (Friend Activity). Auth in the query
+/// string, the track in the JSON body.
+pub async fn now_playing_handler(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+    Json(body): Json<NowPlayingRequest>,
+) -> Response {
+    let (username, _, _) = match authenticated(&state, &params).await {
+        Ok(auth) => auth,
+        Err(response) => return response,
+    };
+    if body.id.trim().is_empty() {
+        return (StatusCode::BAD_REQUEST, "missing id").into_response();
+    }
+    let result = sqlx::query(
+        "INSERT INTO user_activity
+            (username, song_id, title, artist, album, cover_art, updated_at_epoch)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(username) DO UPDATE SET
+            song_id = excluded.song_id,
+            title = excluded.title,
+            artist = excluded.artist,
+            album = excluded.album,
+            cover_art = excluded.cover_art,
+            updated_at_epoch = excluded.updated_at_epoch",
+    )
+    .bind(&username)
+    .bind(body.id.trim())
+    .bind(&body.title)
+    .bind(&body.artist)
+    .bind(&body.album)
+    .bind(&body.cover_art)
+    .bind(vtrack::epoch_secs())
+    .execute(&state.db)
+    .await;
+    match result {
+        Ok(_) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+        Err(error) => {
+            tracing::warn!(%error, username, "now-playing update failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "failed").into_response()
+        }
+    }
+}
+
+/// What everyone else on the instance is listening to (Friend Activity feed).
+pub async fn friends_handler(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let (username, _, _) = match authenticated(&state, &params).await {
+        Ok(auth) => auth,
+        Err(response) => return response,
+    };
+    let rows = sqlx::query_as::<_, FriendRow>(
+        "SELECT username, song_id, title, artist, album, cover_art, updated_at_epoch
+         FROM user_activity
+         WHERE username <> ?
+         ORDER BY updated_at_epoch DESC
+         LIMIT 50",
+    )
+    .bind(&username)
+    .fetch_all(&state.db)
+    .await
+    .unwrap_or_default();
+    let friends: Vec<FriendActivity> = rows
+        .into_iter()
+        .map(|row| FriendActivity {
+            username: row.username,
+            id: row.song_id,
+            title: row.title,
+            artist: row.artist,
+            album: row.album,
+            cover_art: row.cover_art,
+            updated_at: row.updated_at_epoch,
+        })
+        .collect();
+    Json(FriendsResponse { friends }).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NowPlayingRequest {
+    id: String,
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    artist: String,
+    #[serde(default)]
+    album: Option<String>,
+    #[serde(default)]
+    cover_art: Option<String>,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+struct FriendRow {
+    username: String,
+    song_id: String,
+    title: String,
+    artist: String,
+    album: Option<String>,
+    cover_art: Option<String>,
+    updated_at_epoch: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct FriendsResponse {
+    friends: Vec<FriendActivity>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FriendActivity {
+    username: String,
+    id: String,
+    title: String,
+    artist: String,
+    album: Option<String>,
+    cover_art: Option<String>,
+    updated_at: i64,
+}
+
 /// Ingest a pasted YouTube/Yandex/VK link into a virtual track, returning a
 /// streamable `sgr_` id. Auth (Subsonic creds) is in the query string, the link
 /// in the JSON body — mirroring `feedback_handler`.

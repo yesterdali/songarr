@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import * as api from "./api";
-import { Cover, SongRow } from "./components";
+import { Cover, DownloadAllButton, SongRow } from "./components";
 import {
   ChevronLeftIcon,
   GothicCrossIcon,
@@ -540,7 +540,10 @@ export function AlbumView({ id, title }: { id: string; title: string }) {
               <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
                 {songs.length} треков
               </p>
-              <PlayAllButton songs={songs} />
+              <div className="flex flex-wrap items-center gap-3">
+                <PlayAllButton songs={songs} />
+                <DownloadAllButton songs={songs} />
+              </div>
             </div>
           </div>
           <div className="md:max-w-3xl">
@@ -601,8 +604,9 @@ export function PlaylistView({ id, title }: { id: string; title: string }) {
       <Status loading={data.loading} error={data.error} />
       {data.data && (
         <>
-          <div className="mb-5">
+          <div className="mb-5 flex flex-wrap items-center gap-3">
             <PlayAllButton songs={songs} />
+            <DownloadAllButton songs={songs} />
           </div>
           {songs.map((song, position) => (
             <SongRow key={`${song.id}-${position}`} song={song} songs={songs} position={position} />

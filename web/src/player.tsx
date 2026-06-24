@@ -17,13 +17,17 @@ import {
   getLyrics,
   getStarred,
   getWaveNext,
+  reportNowPlaying,
   star,
   streamUrl,
   unstar,
   waveFeedback,
 } from "./api";
 import type { WaveSession } from "./auth";
+import { useDownloads } from "./downloads";
 import type { Song } from "./types";
+
+export type RepeatMode = "off" | "all" | "one";
 
 type PlayerValue = {
   session: WaveSession;
@@ -34,12 +38,16 @@ type PlayerValue = {
   currentTime: number;
   duration: number;
   isWave: boolean;
+  repeat: RepeatMode;
+  shuffle: boolean;
   playQueue: (songs: Song[], startIndex?: number) => void;
   startWave: () => Promise<void>;
   toggle: () => void;
   next: () => void;
   prev: () => void;
   seek: (seconds: number) => void;
+  cycleRepeat: () => void;
+  toggleShuffle: () => void;
   isStarred: (id: string) => boolean;
   toggleStar: (id: string) => void;
   dislikeCurrent: () => void;
@@ -84,7 +92,24 @@ export function PlayerProvider({
   const [duration, setDuration] = useState(0);
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [isWave, setIsWave] = useState(false);
+  const [repeat, setRepeat] = useState<RepeatMode>("off");
+  const [shuffle, setShuffle] = useState(false);
   const extendingRef = useRef(false);
+
+  const downloads = useDownloads();
+  const getPlayableUrl = downloads.getPlayableUrl; // stable identity
+  // Latest values for callbacks/listeners that must stay stable across renders.
+  const downloadsRef = useRef(downloads);
+  downloadsRef.current = downloads;
+  const repeatRef = useRef(repeat);
+  const queueRef = useRef(queue);
+  queueRef.current = queue;
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const shuffleRef = useRef(shuffle);
+  shuffleRef.current = shuffle;
+  // Pre-shuffle order, so toggling shuffle off restores the original sequence.
+  const preShuffleRef = useRef<Song[] | null>(null);
 
   const current = queue[index] ?? null;
 
@@ -111,6 +136,9 @@ export function PlayerProvider({
   const warmAudio = useCallback(
     (song: Song | undefined, keepIds: string[] = []) => {
       if (!song) return;
+      // Downloaded tracks play from the local blob (instant, offline), so don't
+      // burn a network preload slot on them — the load effect uses the blob.
+      if (downloadsRef.current.isDownloaded(song.id)) return;
       const preloads = preloadsRef.current;
       if (preloads.has(song.id)) return;
       for (const [id, audio] of preloads) {
@@ -136,7 +164,10 @@ export function PlayerProvider({
       if (isWave && track) {
         waveFeedback(session, track.id, action).catch(() => undefined);
       }
-      setIndex((i) => (i + 1 < queue.length ? i + 1 : i));
+      setIndex((i) => {
+        if (i + 1 < queue.length) return i + 1;
+        return repeatRef.current === "all" ? 0 : i; // wrap to start on repeat-all
+      });
     },
     [index, isWave, queue, session],
   );
@@ -212,6 +243,7 @@ export function PlayerProvider({
     audio.addEventListener("pause", syncPlayback);
     audio.addEventListener("ended", onEnded);
     audioRef.current = audio;
+    audio.loop = repeatRef.current === "one"; // repeat-one loops without 'ended'
     detachRef.current = () => {
       stopSmoothTiming();
       audio.removeEventListener("timeupdate", syncTiming);
@@ -267,12 +299,21 @@ export function PlayerProvider({
     if (!audio) return;
     setCurrentTime(0);
     setDuration(current.duration ?? 0);
-    audio.src = current.streamUrl ?? streamUrl(session, current.id);
-    audio.load();
-    audio.play().catch(() => {
-      /* autoplay/gesture rejection — the UI play button recovers */
+    let cancelled = false;
+    // Prefer an offline copy (instant + works with no network); fall back to
+    // the network stream. getPlayableUrl resolves null for non-downloaded ids.
+    getPlayableUrl(current.id).then((localUrl) => {
+      if (cancelled || audioRef.current !== audio) return;
+      audio.src = localUrl ?? current.streamUrl ?? streamUrl(session, current.id);
+      audio.load();
+      audio.play().catch(() => {
+        /* autoplay/gesture rejection — the UI play button recovers */
+      });
     });
-  }, [current, session, attach]);
+    return () => {
+      cancelled = true;
+    };
+  }, [current, session, attach, getPlayableUrl]);
 
   // Warm the next track (audio), the large covers, and the lyrics of the
   // current and next tracks, so advancing, opening the full-screen player,
@@ -356,6 +397,12 @@ export function PlayerProvider({
     navigator.mediaSession.setActionHandler("previoustrack", () => prev());
   }, [current, cover, next, prev]);
 
+  // Friend Activity: report the current track whenever it changes.
+  useEffect(() => {
+    if (!current) return;
+    reportNowPlaying(session, current).catch(() => undefined);
+  }, [current, session]);
+
   // Seed liked-track ids once.
   useEffect(() => {
     let cancelled = false;
@@ -369,9 +416,47 @@ export function PlayerProvider({
     };
   }, [session]);
 
+  // Keep repeat-one's gapless loop flag in sync with the live element.
+  useEffect(() => {
+    repeatRef.current = repeat;
+    if (audioRef.current) audioRef.current.loop = repeat === "one";
+  }, [repeat]);
+
+  const cycleRepeat = useCallback(() => {
+    setRepeat((mode) => (mode === "off" ? "all" : mode === "all" ? "one" : "off"));
+  }, []);
+
+  const toggleShuffle = useCallback(() => {
+    const turningOn = !shuffleRef.current;
+    const q = queueRef.current;
+    const idx = indexRef.current;
+    const playing = q[idx];
+    setShuffle(turningOn);
+    if (turningOn) {
+      preShuffleRef.current = q;
+      const head = q.slice(0, idx + 1);
+      const tail = q.slice(idx + 1);
+      for (let i = tail.length - 1; i > 0; i -= 1) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [tail[i], tail[j]] = [tail[j], tail[i]];
+      }
+      setQueue([...head, ...tail]);
+    } else {
+      const original = preShuffleRef.current ?? q;
+      preShuffleRef.current = null;
+      const restoredIndex = playing
+        ? original.findIndex((song) => song.id === playing.id)
+        : idx;
+      setQueue(original);
+      setIndex(restoredIndex >= 0 ? restoredIndex : idx);
+    }
+  }, []);
+
   const playQueue = useCallback((songs: Song[], startIndex = 0) => {
     if (songs.length === 0) return;
     setIsWave(false);
+    setShuffle(false);
+    preShuffleRef.current = null;
     setQueue(songs);
     setIndex(Math.min(Math.max(startIndex, 0), songs.length - 1));
   }, []);
@@ -389,6 +474,8 @@ export function PlayerProvider({
       throw new Error("Wave returned no tracks yet");
     }
     setIsWave(true);
+    setShuffle(false);
+    preShuffleRef.current = null;
     setQueue(songs);
     setIndex(0);
   }, [session]);
@@ -450,12 +537,16 @@ export function PlayerProvider({
       currentTime,
       duration,
       isWave,
+      repeat,
+      shuffle,
       playQueue,
       startWave,
       toggle,
       next,
       prev,
       seek,
+      cycleRepeat,
+      toggleShuffle,
       isStarred,
       toggleStar,
       dislikeCurrent,
@@ -470,12 +561,16 @@ export function PlayerProvider({
       currentTime,
       duration,
       isWave,
+      repeat,
+      shuffle,
       playQueue,
       startWave,
       toggle,
       next,
       prev,
       seek,
+      cycleRepeat,
+      toggleShuffle,
       isStarred,
       toggleStar,
       dislikeCurrent,
