@@ -112,7 +112,10 @@ function toSong(raw: RawSong): Song {
     albumId: raw.albumId,
     duration: raw.duration ?? raw.durationSecs,
     coverArt: raw.coverArt ?? raw.id,
-    streamUrl: raw.streamUrl,
+    // Intentionally ignore any server-provided streamUrl: wave/recs ship a
+    // RELATIVE, opus-format URL that breaks in the Tauri webview (resolves
+    // against tauri://localhost) and in Safari/WebKit (no ogg/opus decode).
+    // The player builds an absolute, mp3 URL from the id instead.
     starred: Boolean(raw.starred),
     provider: raw.provider,
   };
