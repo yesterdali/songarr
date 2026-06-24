@@ -170,6 +170,83 @@ pub async fn resolve(streaming: &Streaming, track: &VirtualTrack) -> anyhow::Res
     })
 }
 
+/// Metadata for a single, already-known URL (a user-pasted link), so it can
+/// become a virtual track without the `ytsearch` matching step.
+#[derive(Debug, Clone)]
+pub struct UrlMeta {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub duration_ms: Option<i64>,
+    pub artwork_url: Option<String>,
+}
+
+/// `yt-dlp --dump-json` for one URL (YouTube or any other extractor, e.g. VK).
+/// Unlike [`resolve`], this does NOT search — it extracts the exact link the
+/// user gave, so the resulting virtual track is pinned to that source.
+pub async fn ytdlp_metadata(streaming: &Streaming, url: &str) -> anyhow::Result<UrlMeta> {
+    let mut command = tokio::process::Command::new(&streaming.ytdlp_path);
+    command
+        .arg("--dump-json")
+        .arg("--no-playlist")
+        .arg("--no-warnings")
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true);
+    if !streaming.ytdlp_proxy.is_empty() {
+        command.arg("--proxy").arg(&streaming.ytdlp_proxy);
+    }
+
+    let output = tokio::time::timeout(std::time::Duration::from_secs(30), command.output())
+        .await
+        .map_err(|_| anyhow::anyhow!("yt-dlp metadata timed out"))??;
+    anyhow::ensure!(
+        output.status.success(),
+        "yt-dlp could not read that link: {}",
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+
+    let text = String::from_utf8_lossy(&output.stdout);
+    let line = text
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .ok_or_else(|| anyhow::anyhow!("yt-dlp returned no metadata"))?;
+    let json: serde_json::Value = serde_json::from_str(line)?;
+
+    let str_field = |keys: &[&str]| -> Option<String> {
+        keys.iter()
+            .find_map(|key| json.get(*key).and_then(|v| v.as_str()))
+            .map(|s| s.to_string())
+    };
+    let title = str_field(&["track", "title"]).unwrap_or_else(|| "Unknown title".to_string());
+    let artist = str_field(&["artist", "creator", "uploader", "channel", "uploader_id"])
+        .unwrap_or_else(|| "Unknown artist".to_string());
+    let id = json
+        .get("id")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(url)
+        .to_string();
+    let duration_ms = json
+        .get("duration")
+        .and_then(|v| v.as_f64())
+        .map(|secs| (secs * 1000.0) as i64);
+    let artwork_url = json
+        .get("thumbnail")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(UrlMeta {
+        id,
+        title,
+        artist,
+        duration_ms,
+        artwork_url,
+    })
+}
+
 /// 0–100 match score (plan M3): title/artist similarity, duration delta,
 /// uploader signals, suspicious-keyword penalties.
 pub fn score(track: &VirtualTrack, candidate: &Candidate) -> i64 {

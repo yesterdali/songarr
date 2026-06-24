@@ -113,6 +113,21 @@ pub async fn wave(config: &YandexConfig, limit: usize) -> anyhow::Result<Vec<Yan
     .await
 }
 
+/// Fetch a single track's metadata by id (for ingesting a pasted Yandex link).
+pub async fn track_meta(config: &YandexConfig, track_id: &str) -> anyhow::Result<YandexTrack> {
+    anyhow::ensure!(available(config), "Yandex disabled or token missing");
+    run_helper(
+        config,
+        "track",
+        &DownloadRequest {
+            access_token: &config.access_token,
+            refresh_token: &config.refresh_token,
+            track_id,
+        },
+    )
+    .await
+}
+
 pub async fn download(config: &YandexConfig, track_id: &str) -> anyhow::Result<YandexDownload> {
     anyhow::ensure!(
         available(config) && config.use_for_import,

@@ -191,6 +191,61 @@ pub async fn feedback_handler(
     }
 }
 
+/// Ingest a pasted YouTube/Yandex/VK link into a virtual track, returning a
+/// streamable `sgr_` id. Auth (Subsonic creds) is in the query string, the link
+/// in the JSON body — mirroring `feedback_handler`.
+pub async fn ingest_handler(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+    Json(body): Json<IngestRequest>,
+) -> Response {
+    let (username, _, _) = match authenticated(&state, &params).await {
+        Ok(auth) => auth,
+        Err(response) => return response,
+    };
+    let url = body.url.trim();
+    if url.is_empty() {
+        return (StatusCode::BAD_REQUEST, "missing url").into_response();
+    }
+    match crate::ingest_url::build_from_url(&state, url).await {
+        Ok(ingested) => {
+            tracing::info!(username, url, id = ingested.id, provider = ingested.provider, "ingested link");
+            Json(IngestResponse {
+                id: ingested.id,
+                artist: ingested.artist,
+                title: ingested.title,
+                provider: ingested.provider.to_string(),
+            })
+            .into_response()
+        }
+        Err(error) => {
+            tracing::warn!(%error, username, url, "link ingest failed");
+            // Unsupported/unparseable link → client error; anything else (a
+            // failed yt-dlp/Yandex extraction) → upstream error.
+            let status = if error.to_string().starts_with("unsupported link") {
+                StatusCode::BAD_REQUEST
+            } else {
+                StatusCode::BAD_GATEWAY
+            };
+            (status, format!("{error}")).into_response()
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct IngestRequest {
+    url: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct IngestResponse {
+    id: String,
+    artist: String,
+    title: String,
+    provider: String,
+}
+
 #[derive(Debug, Serialize)]
 struct WaveNextResponse {
     tracks: Vec<WaveTrack>,

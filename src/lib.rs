@@ -2,6 +2,7 @@ pub mod catalog;
 pub mod config;
 pub mod db;
 pub mod ingest;
+pub mod ingest_url;
 pub mod jobs;
 pub mod lyrics;
 pub mod pending;
@@ -156,6 +157,10 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/wave/api/feedback",
             axum::routing::post(proxy::wave::feedback_handler),
+        )
+        .route(
+            "/wave/api/ingest",
+            axum::routing::post(proxy::wave::ingest_handler),
         )
         .route("/wave/{*path}", get(proxy::wave::asset));
     let router = intercept!(router, "search2", proxy::search::search2_handler);

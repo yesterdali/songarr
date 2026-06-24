@@ -71,16 +71,29 @@ async fn unlink(ctx: Context<'_>) -> Result<(), Error> {
 #[poise::command(slash_command, guild_only)]
 async fn play(
     ctx: Context<'_>,
-    #[description = "Песня, артист или альбом"] query: String,
+    #[description = "Песня, артист, альбом — или ссылка YouTube/Yandex/VK"] query: String,
 ) -> Result<(), Error> {
     ctx.defer().await?;
     let link = user_link(ctx).await?;
     let http = ctx.data().http.clone();
 
     let client = SongarrClient::new(&http, &link);
-    let Some(track) = client.search_song(&query).await? else {
-        ctx.say("Ничего не нашёл.").await?;
-        return Ok(());
+    let trimmed = query.trim();
+    let track = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        // Ingesting a link runs yt-dlp/Yandex on the server (can take a few
+        // seconds); use the no-total-timeout streaming client so the POST
+        // doesn't abort early.
+        SongarrClient::new(&ctx.data().stream_http, &link)
+            .ingest_url(trimmed)
+            .await?
+    } else {
+        match client.search_song(trimmed).await? {
+            Some(track) => track,
+            None => {
+                ctx.say("Ничего не нашёл.").await?;
+                return Ok(());
+            }
+        }
     };
     let url = client.stream_url(&track);
     let label = track.label();

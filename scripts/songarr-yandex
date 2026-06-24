@@ -237,6 +237,20 @@ def cmd_download(payload: dict[str, Any]) -> None:
     )
 
 
+def cmd_track(payload: dict[str, Any]) -> None:
+    client = client_from_payload(payload)
+    track_id = payload.get("trackId") or payload.get("track_id")
+    if not track_id:
+        fail("trackId is required")
+    tracks = client.tracks([track_id])
+    if not tracks:
+        fail(f"Yandex track {track_id} not found")
+    serialized = serialize_track(tracks[0])
+    if not serialized:
+        fail(f"could not read metadata for Yandex track {track_id}")
+    print(json.dumps(serialized, ensure_ascii=False))
+
+
 def cmd_login() -> None:
     client = Client(request=Request(timeout=(10, 30)))
     print("Requesting Yandex device login code...", file=sys.stderr, flush=True)
@@ -284,6 +298,7 @@ COMMANDS = {
     "login": lambda payload: cmd_login(),
     "search": cmd_search,
     "wave": cmd_wave,
+    "track": cmd_track,
     "download": cmd_download,
 }
 
@@ -292,7 +307,7 @@ def main() -> None:
     command = sys.argv[1] if len(sys.argv) > 1 else ""
     handler = COMMANDS.get(command)
     if not handler:
-        fail("usage: songarr-yandex <login|search|wave|download>")
+        fail("usage: songarr-yandex <login|search|wave|track|download>")
     try:
         payload = {} if command == "login" else read_payload()
         handler(payload)

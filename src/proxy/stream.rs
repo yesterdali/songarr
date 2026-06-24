@@ -355,11 +355,17 @@ async fn stream_source(
 
     let resolution = crate::resolve::resolve_cached(state, track).await?;
 
+    // innertube is YouTube-specific; gate on the resolved URL host so the
+    // common deezer→YouTube path keeps the fast path while a pinned non-YouTube
+    // link (e.g. VK) goes straight to yt-dlp instead of a doomed attempt.
+    let is_youtube =
+        resolution.url.contains("youtube.com") || resolution.url.contains("youtu.be");
+
     // Source of original-quality bytes: innertube direct HTTP when enabled
     // and working (~1s to audio), else the yt-dlp pipe (~1.5s with the
     // manifest-skip flags). Direct-fetch failure must degrade speed, never
     // availability.
-    let (reader, ytdlp) = if streaming.innertube {
+    let (reader, ytdlp) = if streaming.innertube && is_youtube {
         match direct_source(state, &resolution.url).await {
             Ok(reader) => {
                 tracing::info!(url = %resolution.url, "using innertube direct source");
@@ -376,7 +382,7 @@ async fn stream_source(
         (reader, Some(child))
     };
     Ok(StreamSource {
-        provider: "youtube",
+        provider: if is_youtube { "youtube" } else { "vk" },
         url: resolution.url,
         score: resolution.score,
         candidate_title: resolution.candidate_title,

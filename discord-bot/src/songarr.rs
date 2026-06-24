@@ -123,6 +123,30 @@ impl<'a> SongarrClient<'a> {
         Ok(track)
     }
 
+    /// Ingest a pasted YouTube/Yandex/VK link into a virtual track on the
+    /// server, returning a streamable track. The proxy does the resolution +
+    /// download (correct egress/token); the bot just streams the result.
+    pub async fn ingest_url(&self, link: &str) -> anyhow::Result<Track> {
+        let url = self.build_url("/wave/api/ingest", &[]);
+        let response = self
+            .http
+            .post(&url)
+            .json(&serde_json::json!({ "url": link }))
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            let detail = body.trim();
+            return Err(anyhow!(
+                "{}",
+                if detail.is_empty() { status.to_string() } else { detail.to_string() }
+            ));
+        }
+        let body: serde_json::Value = response.json().await?;
+        Track::from_json(&body).ok_or_else(|| anyhow!("server returned no track for that link"))
+    }
+
     /// Endless Wave recommendations for this user (`/wave/api/next`).
     pub async fn wave_next(&self, seed: Option<&str>, count: u32) -> anyhow::Result<Vec<Track>> {
         let count = count.to_string();
