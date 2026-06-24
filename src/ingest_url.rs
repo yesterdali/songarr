@@ -26,8 +26,9 @@ pub struct Ingested {
 enum Parsed {
     /// Pin this canonical watch URL; yt-dlp fetches it directly.
     YouTube { watch_url: String },
-    /// Pin the raw VK URL; yt-dlp's VK extractor handles it.
-    Vk { url: String },
+    /// VK audio id `<owner>_<id>`; resolved via the VK helper (yt-dlp has no
+    /// VK audio extractor).
+    Vk { track_id: String },
     /// Resolve by Yandex track id via the helper (token + Russian egress).
     Yandex { track_id: String },
 }
@@ -90,26 +91,54 @@ fn parse(raw: &str) -> anyhow::Result<Parsed> {
         bail!("unsupported link: Yandex URL must point to a track");
     }
 
-    // --- VK (audio/video; yt-dlp's vk extractor) ---
-    if host == "vk.com"
-        || host == "vk.ru"
-        || host == "m.vk.com"
-        || host == "vkvideo.ru"
-        || host.ends_with(".vk.com")
-    {
-        return Ok(Parsed::Vk {
-            url: url.to_string(),
-        });
+    // --- VK Music: vk.com/audio<owner>_<id> (also ?z=audio…) ---
+    if host == "vk.com" || host == "vk.ru" || host == "m.vk.com" || host.ends_with(".vk.com") {
+        if let Some(track_id) = parse_vk_audio_id(&url) {
+            return Ok(Parsed::Vk { track_id });
+        }
+        bail!("unsupported link: VK URL must point to an audio track (vk.com/audio…)");
     }
 
     bail!("unsupported link: {host} is not YouTube, Yandex Music, or VK")
+}
+
+/// Extract a VK audio id (`<owner>_<id>` with optional `_<hash>`) from the path
+/// or `z=` query of a VK link, e.g. `vk.com/audio-2001262717_136262717`.
+fn parse_vk_audio_id(url: &reqwest::Url) -> Option<String> {
+    let haystacks = std::iter::once(url.path().to_string())
+        .chain(url.query_pairs().map(|(_, v)| v.to_string()));
+    for hay in haystacks {
+        if let Some(idx) = hay.find("audio") {
+            let rest = &hay[idx + "audio".len()..];
+            let id: String = rest
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            if is_vk_audio_id(&id) {
+                return Some(id);
+            }
+        }
+    }
+    None
+}
+
+/// `<owner>_<id>`: owner is an optionally-negative integer, id an integer.
+fn is_vk_audio_id(s: &str) -> bool {
+    let mut parts = s.splitn(3, '_');
+    let owner = parts.next().unwrap_or("");
+    let aid = parts.next().unwrap_or("");
+    let owner_digits = owner.strip_prefix('-').unwrap_or(owner);
+    !owner_digits.is_empty()
+        && owner_digits.bytes().all(|b| b.is_ascii_digit())
+        && !aid.is_empty()
+        && aid.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Public entry point used by the HTTP handler.
 pub async fn build_from_url(state: &AppState, raw_url: &str) -> anyhow::Result<Ingested> {
     match parse(raw_url)? {
         Parsed::YouTube { watch_url } => pinned_ytdlp(state, "youtube", &watch_url).await,
-        Parsed::Vk { url } => pinned_ytdlp(state, "vk", &url).await,
+        Parsed::Vk { track_id } => vk_virtual(state, &track_id).await,
         Parsed::Yandex { track_id } => yandex_virtual(state, &track_id).await,
     }
 }
@@ -192,6 +221,46 @@ async fn yandex_virtual(state: &AppState, track_id: &str) -> anyhow::Result<Inge
     })
 }
 
+/// VK: create the virtual track keyed by audio id; `stream_source`'s vk branch
+/// resolves the (HLS) media URL on play.
+async fn vk_virtual(state: &AppState, track_id: &str) -> anyhow::Result<Ingested> {
+    ensure!(
+        crate::vk::available(&state.config.vk),
+        "VK Music is not enabled on this server"
+    );
+    let (artist, title, album, duration_ms, artwork_url) =
+        match crate::vk::track_meta(&state.config.vk, track_id).await {
+            Ok(t) => (t.artist, t.title, t.album, t.duration_ms, t.artwork_url),
+            Err(error) => {
+                tracing::warn!(%error, track_id, "VK metadata lookup failed; using placeholder");
+                (
+                    "Unknown artist".to_string(),
+                    format!("VK track {track_id}"),
+                    None,
+                    None,
+                    None,
+                )
+            }
+        };
+    let catalog = CatalogTrack {
+        provider: crate::vk::PROVIDER,
+        provider_track_id: track_id.to_string(),
+        artist: artist.clone(),
+        title: title.clone(),
+        album,
+        duration_ms,
+        isrc: None,
+        artwork_url,
+    };
+    let id = vtrack::upsert(&state.db, &catalog).await?;
+    Ok(Ingested {
+        id,
+        artist,
+        title,
+        provider: crate::vk::PROVIDER,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,16 +316,25 @@ mod tests {
         }
     }
 
+    fn vk(raw: &str) -> String {
+        match parse(raw).unwrap() {
+            Parsed::Vk { track_id } => track_id,
+            other => panic!("expected VK, got {}", label(&other)),
+        }
+    }
+
     #[test]
-    fn vk_urls() {
-        assert!(matches!(
-            parse("https://vk.com/audio-2000_456").unwrap(),
-            Parsed::Vk { .. }
-        ));
-        assert!(matches!(
-            parse("https://m.vk.com/video-1_2").unwrap(),
-            Parsed::Vk { .. }
-        ));
+    fn vk_audio_urls() {
+        assert_eq!(
+            vk("https://vk.com/audio-2001262717_136262717"),
+            "-2001262717_136262717"
+        );
+        assert_eq!(vk("https://m.vk.com/audio123_456"), "123_456");
+        // the `?z=audio…` share form
+        assert_eq!(vk("https://vk.com/feed?z=audio-1_2"), "-1_2");
+        // VK *video* is not audio → rejected
+        assert!(parse("https://vk.com/video-1_2").is_err());
+        assert!(parse("https://vk.com/im").is_err());
     }
 
     #[test]

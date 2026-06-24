@@ -353,6 +353,17 @@ async fn stream_source(
         }
     }
 
+    if track.provider == crate::vk::PROVIDER && crate::vk::available(&state.config.vk) {
+        match vk_source(state, track).await {
+            Ok(source) => return Ok(source),
+            Err(error) => {
+                // No VK fallback exists, but the virtual track carries
+                // artist/title, so degrade to a YouTube search rather than fail.
+                tracing::info!(%error, track = track.id, "VK source unavailable; falling back to YouTube");
+            }
+        }
+    }
+
     let resolution = crate::resolve::resolve_cached(state, track).await?;
 
     // innertube is YouTube-specific; gate on the resolved URL host so the
@@ -415,6 +426,52 @@ async fn yandex_source(state: &AppState, track: &VirtualTrack) -> anyhow::Result
         reader: Box::new(StreamReader::new(stream)),
         ytdlp: None,
     })
+}
+
+/// VK audio source: resolve the (HLS) media URL via the helper, then let ffmpeg
+/// fetch + demux it. VK serves encrypted HLS, so we cannot pipe raw bytes the
+/// way Yandex does — ffmpeg must own the URL.
+async fn vk_source(state: &AppState, track: &VirtualTrack) -> anyhow::Result<StreamSource> {
+    let media = crate::vk::resolve(&state.config.vk, &track.provider_track_id).await?;
+    let (reader, child) = spawn_ffmpeg_url_source(&media.url)?;
+    Ok(StreamSource {
+        provider: crate::vk::PROVIDER,
+        url: media.url,
+        score: 100,
+        candidate_title: track.title.clone(),
+        reader,
+        // Keep the ffmpeg child alive for the stream's lifetime (same slot the
+        // yt-dlp child uses).
+        ytdlp: Some(child),
+    })
+}
+
+/// ffmpeg reading a URL directly (handles plain files AND HLS), re-encoding to
+/// MP3 on stdout so it feeds the normal transcode pump like any other source.
+fn spawn_ffmpeg_url_source(url: &str) -> anyhow::Result<(SourceReader, tokio::process::Child)> {
+    let mut command = tokio::process::Command::new("ffmpeg");
+    command
+        .arg("-nostdin")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-i")
+        .arg(url)
+        .arg("-vn")
+        .arg("-c:a")
+        .arg("libmp3lame")
+        .arg("-b:a")
+        .arg("320k")
+        .arg("-f")
+        .arg("mp3")
+        .arg("-")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    let mut child = command.spawn()?;
+    let stdout = child.stdout.take().expect("ffmpeg stdout piped");
+    drain_stderr(child.stderr.take(), "ffmpeg-vk");
+    Ok((Box::new(stdout), child))
 }
 
 /// Direct innertube source: resolve the media URL and open the HTTP stream.

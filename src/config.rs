@@ -35,6 +35,8 @@ pub struct Config {
     pub lyrics: Lyrics,
     #[serde(default)]
     pub yandex: Yandex,
+    #[serde(default)]
+    pub vk: Vk,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -64,6 +66,32 @@ impl Default for Yandex {
             use_for_search: true,
             use_for_import: true,
             api_timeout_secs: 10,
+        }
+    }
+}
+
+/// VK Music (unofficial audio API via the Python helper). Used to play pasted
+/// `vk.com/audio…` links — yt-dlp has no VK audio extractor.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Vk {
+    pub enabled: bool,
+    /// Path to the JSON helper (installed by the Docker image).
+    pub helper_path: String,
+    /// Kate-Mobile-style token with audio scope. Empty keeps VK inactive.
+    pub access_token: String,
+    pub api_timeout_secs: u64,
+}
+
+impl Default for Vk {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            helper_path: "/usr/local/bin/songarr-vk".into(),
+            access_token: String::new(),
+            // VK audio is encrypted HLS; the helper round-trip can be slower
+            // than Yandex, so allow a little more headroom.
+            api_timeout_secs: 15,
         }
     }
 }
@@ -375,6 +403,20 @@ impl Config {
         }
         if let Ok(value) = std::env::var("SONGARR_YANDEX_REFRESH_TOKEN") {
             self.yandex.refresh_token = value;
+        }
+        if let Ok(value) = std::env::var("SONGARR_VK_ENABLED") {
+            self.vk.enabled = matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            );
+        }
+        if let Ok(value) = std::env::var("SONGARR_VK_HELPER_PATH") {
+            if !value.trim().is_empty() {
+                self.vk.helper_path = value;
+            }
+        }
+        if let Ok(value) = std::env::var("SONGARR_VK_ACCESS_TOKEN") {
+            self.vk.access_token = value;
         }
     }
 }

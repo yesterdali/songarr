@@ -39,6 +39,9 @@ services:
       SONGARR_YANDEX_ENABLED: "${SONGARR_YANDEX_ENABLED:-false}"
       SONGARR_YANDEX_ACCESS_TOKEN: "${SONGARR_YANDEX_ACCESS_TOKEN:-}"
       SONGARR_YANDEX_REFRESH_TOKEN: "${SONGARR_YANDEX_REFRESH_TOKEN:-}"
+      # Optional VK Music (play pasted vk.com/audio… links).
+      SONGARR_VK_ENABLED: "${SONGARR_VK_ENABLED:-false}"
+      SONGARR_VK_ACCESS_TOKEN: "${SONGARR_VK_ACCESS_TOKEN:-}"
 
   # Discord bot — plays Songarr in voice channels. Deliberately NOT behind
   # gluetun: it needs plain outbound to Discord (incl. voice UDP). It reaches

@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""Songarr <-> VK Music JSON helper.
+
+yt-dlp has no VK audio extractor, so pasted ``vk.com/audio…`` links are resolved
+here via the unofficial VK audio API (``audio.getById``) using ``vk_api`` under a
+Kate-Mobile token. Mirrors ``songarr-yandex``: one JSON object in on stdin, JSON
+out on stdout.
+
+Get a token once with::
+
+    songarr-vk login   # then paste the printed accessToken into [vk].access_token
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from typing import Any
+
+
+def fail(message: str, code: int = 1) -> None:
+    print(message, file=sys.stderr)
+    raise SystemExit(code)
+
+
+try:
+    import vk_api
+except Exception as exc:  # pragma: no cover - exercised in deployment, not tests
+    fail(f"Cannot import vk_api. Install it: pip install vk_api ({exc})")
+
+
+# Kate Mobile — the only widely-working app id/secret combo that grants the
+# `audio` scope third-party clients need.
+KATE_APP_ID = 2685278
+KATE_CLIENT_SECRET = "hHbZxrka2uZ6jB1inYsH"
+
+
+def read_payload() -> dict[str, Any]:
+    raw = sys.stdin.read().strip()
+    return json.loads(raw) if raw else {}
+
+
+def api_from_payload(payload: dict[str, Any]) -> Any:
+    token = payload.get("accessToken") or payload.get("access_token")
+    if not token:
+        fail("accessToken is required")
+    session = vk_api.VkApi(token=token, api_version="5.131")
+    return session.get_api()
+
+
+def cover_url(audio: dict[str, Any]) -> str | None:
+    album = audio.get("album") or {}
+    thumb = album.get("thumb") or {}
+    for key in ("photo_600", "photo_300", "photo_270", "photo_135"):
+        if thumb.get(key):
+            return thumb[key]
+    return None
+
+
+def get_audio(api: Any, track_id: str) -> dict[str, Any]:
+    # `audios` takes "<owner_id>_<audio_id>" exactly as it appears in the URL.
+    items = api.audio.getById(audios=track_id)
+    if not items:
+        fail(f"VK audio {track_id} not found (or token lacks audio access)")
+    return items[0]
+
+
+def serialize_track(audio: dict[str, Any]) -> dict[str, Any]:
+    owner = audio.get("owner_id")
+    aid = audio.get("id")
+    track_id = f"{owner}_{aid}" if owner is not None and aid is not None else None
+    duration = audio.get("duration")
+    return {
+        "trackId": track_id,
+        "artist": audio.get("artist") or "Unknown artist",
+        "title": audio.get("title") or "Unknown title",
+        "album": (audio.get("album") or {}).get("title"),
+        "durationMs": int(duration) * 1000 if duration else None,
+        "artworkUrl": cover_url(audio),
+    }
+
+
+def cmd_track(payload: dict[str, Any]) -> None:
+    api = api_from_payload(payload)
+    track_id = payload.get("trackId") or payload.get("track_id")
+    if not track_id:
+        fail("trackId is required")
+    print(json.dumps(serialize_track(get_audio(api, track_id)), ensure_ascii=False))
+
+
+def cmd_download(payload: dict[str, Any]) -> None:
+    api = api_from_payload(payload)
+    track_id = payload.get("trackId") or payload.get("track_id")
+    if not track_id:
+        fail("trackId is required")
+    audio = get_audio(api, track_id)
+    url = audio.get("url")
+    if not url:
+        fail(
+            "VK returned no playable url for this track "
+            "(token may lack audio access, or the track is region/owner-locked)"
+        )
+    # VK serves audio as HLS (.m3u8); ffmpeg consumes it directly.
+    codec = "hls" if ".m3u8" in url else "mp3"
+    print(json.dumps({"url": url, "codec": codec}, ensure_ascii=False))
+
+
+def cmd_login(payload: dict[str, Any]) -> None:
+    login = payload.get("login")
+    password = payload.get("password")
+    if not login or not password:
+        fail('login requires {"login": "...", "password": "..."} on stdin')
+
+    pending_code: dict[str, Any] = {"value": payload.get("code")}
+
+    def two_factor() -> tuple[str, bool]:
+        code = pending_code["value"]
+        if not code:
+            fail(
+                "VK asked for a 2FA code. Re-run with "
+                '{"login","password","code"} on stdin.'
+            )
+        return str(code), True
+
+    session = vk_api.VkApi(
+        login=login,
+        password=password,
+        app_id=KATE_APP_ID,
+        client_secret=KATE_CLIENT_SECRET,
+        api_version="5.131",
+        auth_handler=two_factor,
+    )
+    session.auth(token_only=True)
+    token = session.token.get("access_token")
+    if not token:
+        fail("VK auth did not return a token")
+    print(json.dumps({"accessToken": token}, ensure_ascii=False, indent=2))
+
+
+COMMANDS = {
+    "login": cmd_login,
+    "track": cmd_track,
+    "download": cmd_download,
+}
+
+
+def main() -> None:
+    command = sys.argv[1] if len(sys.argv) > 1 else ""
+    handler = COMMANDS.get(command)
+    if not handler:
+        fail("usage: songarr-vk <login|track|download>")
+    try:
+        handler(read_payload())
+    except SystemExit:
+        raise
+    except Exception as exc:
+        fail(f"{type(exc).__name__}: {exc}")
+
+
+if __name__ == "__main__":
+    main()

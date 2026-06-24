@@ -11,6 +11,7 @@ pub mod recs;
 pub mod resolve;
 pub mod subsonic;
 pub mod valbum;
+pub mod vk;
 pub mod vtrack;
 pub mod yandex;
 

@@ -58,6 +58,13 @@ use_for_search = true
 use_for_import = true           # Yandex-origin tracks try Yandex audio before YouTube fallback
 api_timeout_secs = 10
 
+[vk]
+enabled = false                 # play pasted vk.com/audio… links (yt-dlp has no VK audio extractor)
+helper_path = "/usr/local/bin/songarr-vk"
+access_token = ""               # Kate-Mobile token w/ audio scope; get one via `songarr-vk login`.
+                                # prefer SONGARR_VK_ACCESS_TOKEN / Docker secret injection
+api_timeout_secs = 15           # VK audio is encrypted HLS; allow extra headroom
+
 [artist_expansion]
 enabled = true                  # show external provider albums under getArtist
 max_albums = 12
