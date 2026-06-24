@@ -61,3 +61,17 @@ export type FriendActivity = {
   /** Unix epoch seconds of the play. */
   updatedAt: number;
 };
+
+// The Discord bot's reported playback, for remote control.
+export type RemoteState = {
+  connected: boolean;
+  song: Song | null;
+  positionMs?: number;
+  durationMs?: number;
+  isPlaying: boolean;
+  queue: Song[];
+  /** Server epoch seconds. */
+  updatedAt: number;
+  /** Client Date.now() ms when received — used to interpolate position. */
+  fetchedAt: number;
+};

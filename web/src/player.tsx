@@ -15,8 +15,10 @@ import {
 import {
   coverUrl,
   getLyrics,
+  getRemoteState,
   getStarred,
   getWaveNext,
+  remoteCommand,
   reportNowPlaying,
   star,
   streamUrl,
@@ -25,7 +27,19 @@ import {
 } from "./api";
 import type { WaveSession } from "./auth";
 import { useDownloads } from "./downloads";
-import type { Song } from "./types";
+import type { RemoteState, Song } from "./types";
+
+/** A track reduced to the fields the bot needs in a remote `play` command. */
+function toRemoteTrack(song: Song) {
+  return {
+    id: song.id,
+    title: song.title,
+    artist: song.artist,
+    album: song.album ?? null,
+    coverArt: song.coverArt ?? null,
+    duration: song.duration ?? null,
+  };
+}
 
 export type RepeatMode = "off" | "all" | "one";
 
@@ -40,6 +54,12 @@ type PlayerValue = {
   isWave: boolean;
   repeat: RepeatMode;
   shuffle: boolean;
+  /** Remote control: true while the app is driving the Discord bot. */
+  remoteOn: boolean;
+  /** True once the bot has actually joined voice (fresh heartbeat). */
+  remoteConnected: boolean;
+  connectRemote: () => void;
+  disconnectRemote: () => void;
   playQueue: (songs: Song[], startIndex?: number) => void;
   startWave: () => Promise<void>;
   toggle: () => void;
@@ -94,6 +114,14 @@ export function PlayerProvider({
   const [isWave, setIsWave] = useState(false);
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
+  // Remote control (Spotify-Connect-style: app drives the Discord bot).
+  const [remoteOn, setRemoteOn] = useState(false);
+  const [remoteState, setRemoteState] = useState<RemoteState | null>(null);
+  const [, bumpRemoteClock] = useState(0); // re-render to interpolate progress
+  const remoteOnRef = useRef(remoteOn);
+  remoteOnRef.current = remoteOn;
+  const remoteStateRef = useRef(remoteState);
+  remoteStateRef.current = remoteState;
   const extendingRef = useRef(false);
 
   const downloads = useDownloads();
@@ -115,6 +143,13 @@ export function PlayerProvider({
 
   const cover = useCallback(
     (coverArt: string | undefined, size = 200) => coverUrl(session, coverArt, size),
+    [session],
+  );
+
+  const dispatchRemote = useCallback(
+    (action: string, payload?: unknown) => {
+      remoteCommand(session, action, payload).catch(() => undefined);
+    },
     [session],
   );
 
@@ -173,21 +208,29 @@ export function PlayerProvider({
   );
 
   const next = useCallback(() => {
+    if (remoteOnRef.current) {
+      dispatchRemote("next");
+      return;
+    }
     advance("skip");
-  }, [advance]);
+  }, [advance, dispatchRemote]);
 
   const completeAndNext = useCallback(() => {
     advance("play");
   }, [advance]);
 
   const prev = useCallback(() => {
+    if (remoteOnRef.current) {
+      dispatchRemote("prev");
+      return;
+    }
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       return;
     }
     setIndex((i) => (i > 0 ? i - 1 : i));
-  }, []);
+  }, [dispatchRemote]);
 
   // `ended` must always advance from the latest queue state, while the
   // attached listeners stay stable across element swaps — bridge via a ref.
@@ -280,7 +323,7 @@ export function PlayerProvider({
   // Load + play whenever the current track changes; if the track was already
   // preloaded, swap elements and start instantly.
   useEffect(() => {
-    if (!current) return;
+    if (!current || remoteOnRef.current) return; // remote: the bot plays, not us
     const preloaded = preloadsRef.current.get(current.id);
     if (preloaded) {
       preloadsRef.current.delete(current.id);
@@ -319,6 +362,7 @@ export function PlayerProvider({
   // current and next tracks, so advancing, opening the full-screen player,
   // and the lyrics button are all instant. getLyrics memoizes per song id.
   useEffect(() => {
+    if (remoteOnRef.current) return; // remote: no local preloading
     const nextSong = queue[index + 1];
     warmAudio(nextSong);
     warmCovers(current ?? undefined);
@@ -360,7 +404,7 @@ export function PlayerProvider({
 
   // Endless Wave: ask the server for more when the queue is almost drained.
   useEffect(() => {
-    if (!isWave || !current || extendingRef.current) return;
+    if (!isWave || !current || extendingRef.current || remoteOnRef.current) return;
     if (queue.length - index > 3) return;
     extendingRef.current = true;
     getWaveNext(session, { seedId: current.id, count: 12 })
@@ -397,11 +441,43 @@ export function PlayerProvider({
     navigator.mediaSession.setActionHandler("previoustrack", () => prev());
   }, [current, cover, next, prev]);
 
-  // Friend Activity: report the current track whenever it changes.
+  // Friend Activity: report the current track whenever it changes. While remote,
+  // the bot reports state instead (the proxy mirrors it into now-playing).
   useEffect(() => {
-    if (!current) return;
+    if (!current || remoteOnRef.current) return;
     reportNowPlaying(session, current).catch(() => undefined);
   }, [current, session]);
+
+  // Remote: poll the bot's playback state while connected.
+  useEffect(() => {
+    if (!remoteOn) return;
+    let active = true;
+    const load = () =>
+      getRemoteState(session)
+        .then((state) => {
+          if (active) setRemoteState(state);
+        })
+        .catch(() => undefined);
+    load();
+    const id = window.setInterval(load, 1500);
+    return () => {
+      active = false;
+      window.clearInterval(id);
+    };
+  }, [remoteOn, session]);
+
+  // Remote: tick a few times a second so the progress bar interpolates between
+  // the (slower) state polls.
+  useEffect(() => {
+    if (!remoteOn || !remoteState?.isPlaying) return;
+    const id = window.setInterval(() => bumpRemoteClock((n) => n + 1), 500);
+    return () => window.clearInterval(id);
+  }, [remoteOn, remoteState?.isPlaying]);
+
+  // Remote: silence local audio while a remote device is in control.
+  useEffect(() => {
+    if (remoteOn) audioRef.current?.pause();
+  }, [remoteOn]);
 
   // Seed liked-track ids once.
   useEffect(() => {
@@ -452,14 +528,33 @@ export function PlayerProvider({
     }
   }, []);
 
-  const playQueue = useCallback((songs: Song[], startIndex = 0) => {
-    if (songs.length === 0) return;
-    setIsWave(false);
-    setShuffle(false);
-    preShuffleRef.current = null;
-    setQueue(songs);
-    setIndex(Math.min(Math.max(startIndex, 0), songs.length - 1));
-  }, []);
+  const playQueue = useCallback(
+    (songs: Song[], startIndex = 0) => {
+      if (songs.length === 0) return;
+      if (remoteOnRef.current) {
+        dispatchRemote("play", { tracks: songs.map(toRemoteTrack), startIndex });
+        return;
+      }
+      setIsWave(false);
+      setShuffle(false);
+      preShuffleRef.current = null;
+      setQueue(songs);
+      setIndex(Math.min(Math.max(startIndex, 0), songs.length - 1));
+    },
+    [dispatchRemote],
+  );
+
+  const connectRemote = useCallback(() => {
+    audioRef.current?.pause();
+    setRemoteOn(true);
+    dispatchRemote("connect");
+  }, [dispatchRemote]);
+
+  const disconnectRemote = useCallback(() => {
+    dispatchRemote("disconnect");
+    setRemoteOn(false);
+    setRemoteState(null);
+  }, [dispatchRemote]);
 
   const startWave = useCallback(async () => {
     // Use the batch prefetched at startup when available; fetch fresh after
@@ -473,24 +568,43 @@ export function PlayerProvider({
     if (songs.length === 0) {
       throw new Error("Wave returned no tracks yet");
     }
+    if (remoteOnRef.current) {
+      dispatchRemote("play", { tracks: songs.map(toRemoteTrack), startIndex: 0 });
+      return;
+    }
     setIsWave(true);
     setShuffle(false);
     preShuffleRef.current = null;
     setQueue(songs);
     setIndex(0);
-  }, [session]);
+  }, [session, dispatchRemote]);
 
   const toggle = useCallback(() => {
+    if (remoteOnRef.current) {
+      const playing = remoteStateRef.current?.isPlaying ?? false;
+      dispatchRemote(playing ? "pause" : "resume");
+      setRemoteState((s) => (s ? { ...s, isPlaying: !playing, fetchedAt: Date.now() } : s));
+      return;
+    }
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) audio.play().catch(() => undefined);
     else audio.pause();
-  }, []);
+  }, [dispatchRemote]);
 
-  const seek = useCallback((seconds: number) => {
-    const audio = audioRef.current;
-    if (audio) audio.currentTime = seconds;
-  }, []);
+  const seek = useCallback(
+    (seconds: number) => {
+      if (remoteOnRef.current) {
+        const positionMs = Math.round(Math.max(seconds, 0) * 1000);
+        dispatchRemote("seek", { positionMs });
+        setRemoteState((s) => (s ? { ...s, positionMs, fetchedAt: Date.now() } : s));
+        return;
+      }
+      const audio = audioRef.current;
+      if (audio) audio.currentTime = seconds;
+    },
+    [dispatchRemote],
+  );
 
   const isStarred = useCallback((id: string) => starredIds.has(id), [starredIds]);
 
@@ -520,25 +634,56 @@ export function PlayerProvider({
   );
 
   const dislikeCurrent = useCallback(() => {
+    if (remoteOnRef.current) {
+      dispatchRemote("next");
+      return;
+    }
     if (!current) return;
     if (isWave) {
       waveFeedback(session, current.id, "dislike").catch(() => undefined);
     }
     advance("skip");
-  }, [advance, current, isWave, session]);
+  }, [advance, current, isWave, session, dispatchRemote]);
+
+  // Exposed playback view: the bot's reported state while remote, else local.
+  // Remote position is interpolated from the last poll so the bar moves live.
+  const remoteSecs = (() => {
+    const s = remoteState;
+    if (!remoteOn || !s) return 0;
+    const base = (s.positionMs ?? 0) / 1000;
+    if (!s.isPlaying) return base;
+    const dur = (s.durationMs ?? 0) / 1000;
+    const t = base + (Date.now() - s.fetchedAt) / 1000;
+    return dur > 0 ? Math.min(t, dur) : t;
+  })();
+  const exposedCurrent = remoteOn ? remoteState?.song ?? null : current;
+  const exposedIsPlaying = remoteOn ? remoteState?.isPlaying ?? false : isPlaying;
+  const exposedTime = remoteOn ? remoteSecs : currentTime;
+  const exposedDuration = remoteOn ? (remoteState?.durationMs ?? 0) / 1000 : duration;
+  const exposedQueue = remoteOn
+    ? remoteState?.song
+      ? [remoteState.song, ...(remoteState.queue ?? [])]
+      : remoteState?.queue ?? []
+    : queue;
+  const exposedIndex = remoteOn ? 0 : index;
+  const remoteConnected = remoteState?.connected ?? false;
 
   const value = useMemo<PlayerValue>(
     () => ({
       session,
-      queue,
-      index,
-      current,
-      isPlaying,
-      currentTime,
-      duration,
+      queue: exposedQueue,
+      index: exposedIndex,
+      current: exposedCurrent,
+      isPlaying: exposedIsPlaying,
+      currentTime: exposedTime,
+      duration: exposedDuration,
       isWave,
       repeat,
       shuffle,
+      remoteOn,
+      remoteConnected,
+      connectRemote,
+      disconnectRemote,
       playQueue,
       startWave,
       toggle,
@@ -554,15 +699,19 @@ export function PlayerProvider({
     }),
     [
       session,
-      queue,
-      index,
-      current,
-      isPlaying,
-      currentTime,
-      duration,
+      exposedQueue,
+      exposedIndex,
+      exposedCurrent,
+      exposedIsPlaying,
+      exposedTime,
+      exposedDuration,
       isWave,
       repeat,
       shuffle,
+      remoteOn,
+      remoteConnected,
+      connectRemote,
+      disconnectRemote,
       playQueue,
       startWave,
       toggle,

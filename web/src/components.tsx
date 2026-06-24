@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   BanIcon,
+  CastIcon,
   ChevronLeftIcon,
   DownloadDoneIcon,
   DownloadIcon,
@@ -769,6 +770,38 @@ function timeAgo(epochSecs: number): string {
   return `${Math.floor(diff / 86_400)} дн назад`;
 }
 
+/** Sidebar toggle: hand playback to the Discord bot (Vivaldi) and back. While
+ *  connected, the app is a remote — the playbar drives the bot. */
+export function DiscordConnectToggle() {
+  const { remoteOn, remoteConnected, connectRemote, disconnectRemote } = usePlayer();
+  const label = remoteOn
+    ? remoteConnected
+      ? "Vivaldi · подключено"
+      : "Подключаюсь…"
+    : "Слушать в Discord";
+  return (
+    <button
+      type="button"
+      onClick={() => (remoteOn ? disconnectRemote() : connectRemote())}
+      className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition active:scale-[0.98] ${
+        remoteOn
+          ? "border-wave-pink/30 bg-wave-pink/10 text-wave-pink"
+          : "border-white/10 text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
+      }`}
+    >
+      <CastIcon className="h-5 w-5 shrink-0" />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {remoteOn && (
+        <span
+          className={`h-2 w-2 shrink-0 rounded-full ${
+            remoteConnected ? "bg-green-400" : "animate-pulse bg-amber-400"
+          }`}
+        />
+      )}
+    </button>
+  );
+}
+
 /** Right-side Friend Activity feed: what everyone else is listening to. Tap a
  *  row to play that track. (For now every account on the instance is a friend.) */
 export function FriendsPanel() {
@@ -850,6 +883,7 @@ export function PlayBar({ onOpen }: { onOpen: () => void }) {
     duration,
     repeat,
     shuffle,
+    remoteOn,
     toggle,
     next,
     prev,
@@ -884,6 +918,11 @@ export function PlayBar({ onOpen }: { onOpen: () => void }) {
               {current.artist}
             </span>
           </button>
+          {remoteOn && (
+            <span className="hidden shrink-0 items-center gap-1 rounded-full bg-wave-pink/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-wave-pink xl:inline-flex">
+              <CastIcon className="h-3 w-3" /> Discord
+            </span>
+          )}
           <button
             type="button"
             aria-label="like"

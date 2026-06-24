@@ -49,6 +49,25 @@ pub async fn get_link(pool: &SqlitePool, discord_id: u64) -> anyhow::Result<Opti
     }))
 }
 
+/// Every linked account (discord id + credentials). Used by the remote-control
+/// loop, which polls each linked user's command queue.
+pub async fn all_links(pool: &SqlitePool) -> anyhow::Result<Vec<(u64, Link)>> {
+    let rows: Vec<(String, String, String, String, String)> = sqlx::query_as(
+        "SELECT discord_id, server_url, username, salt, token FROM links",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|(discord_id, server_url, username, salt, token)| {
+            discord_id
+                .parse::<u64>()
+                .ok()
+                .map(|id| (id, Link { server_url, username, salt, token }))
+        })
+        .collect())
+}
+
 pub async fn set_link(pool: &SqlitePool, discord_id: u64, link: &Link) -> anyhow::Result<()> {
     sqlx::query(
         "INSERT INTO links (discord_id, server_url, username, salt, token)

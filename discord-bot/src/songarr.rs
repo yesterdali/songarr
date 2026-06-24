@@ -171,6 +171,35 @@ impl<'a> SongarrClient<'a> {
             &[("id", &track.id), ("format", "mp3"), ("maxBitRate", "320")],
         )
     }
+
+    /// Remote control: pull commands the app queued for this user (seq > after).
+    pub async fn remote_commands(&self, after: i64) -> anyhow::Result<Vec<RemoteCommand>> {
+        let after = after.to_string();
+        let url = self.build_url("/wave/api/remote/commands", &[("after", after.as_str())]);
+        let response = self.http.get(&url).send().await?.error_for_status()?;
+        let body: serde_json::Value = response.json().await?;
+        let commands = body.get("commands").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        Ok(commands
+            .into_iter()
+            .filter_map(|c| serde_json::from_value(c).ok())
+            .collect())
+    }
+
+    /// Remote control: report current playback state (also a heartbeat).
+    pub async fn remote_report_state(&self, state: &serde_json::Value) -> anyhow::Result<()> {
+        let url = self.build_url("/wave/api/remote/state", &[]);
+        self.http.post(&url).json(state).send().await?.error_for_status()?;
+        Ok(())
+    }
+}
+
+/// One queued remote command from the app.
+#[derive(Debug, Clone, serde::Deserialize)]
+pub struct RemoteCommand {
+    pub seq: i64,
+    pub action: String,
+    #[serde(default)]
+    pub payload: serde_json::Value,
 }
 
 fn join_path(base: &str, path: &str) -> String {

@@ -1,6 +1,7 @@
 mod commands;
 mod config;
 mod playback;
+mod remote;
 mod songarr;
 mod store;
 
@@ -70,10 +71,20 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let test_guild = config.test_guild;
+    // Clones for the remote-control loop (data is moved into setup below).
+    let remote_db = data.db.clone();
+    let remote_http = data.http.clone();
+    let remote_stream_http = data.stream_http.clone();
     let framework = poise::Framework::builder()
         .options(options)
         .setup(move |ctx, ready, framework| {
             Box::pin(async move {
+                tokio::spawn(remote::run(
+                    ctx.clone(),
+                    remote_db,
+                    remote_http,
+                    remote_stream_http,
+                ));
                 let count = framework.options().commands.len();
                 match test_guild {
                     Some(id) => {

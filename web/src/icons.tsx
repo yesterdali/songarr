@@ -222,3 +222,13 @@ export function DownloadDoneIcon({ className = "" }: IconProps) {
     </svg>
   );
 }
+
+export function CastIcon({ className = "" }: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" {...strokeProps} className={className}>
+      <path d="M2 16a6 6 0 0 1 6 6" />
+      <path d="M2 12a10 10 0 0 1 10 10" />
+      <path d="M2 8.5V6a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-6" />
+    </svg>
+  );
+}

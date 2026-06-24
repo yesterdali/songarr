@@ -168,6 +168,19 @@ pub fn build_app(state: AppState) -> Router {
             axum::routing::post(proxy::wave::now_playing_handler),
         )
         .route("/wave/api/friends", get(proxy::wave::friends_handler))
+        .route(
+            "/wave/api/remote/command",
+            axum::routing::post(proxy::wave::remote_command_handler),
+        )
+        .route(
+            "/wave/api/remote/commands",
+            get(proxy::wave::remote_commands_handler),
+        )
+        .route(
+            "/wave/api/remote/state",
+            get(proxy::wave::remote_state_handler)
+                .post(proxy::wave::remote_state_report_handler),
+        )
         .route("/wave/{*path}", get(proxy::wave::asset));
     let router = intercept!(router, "search2", proxy::search::search2_handler);
     let router = intercept!(router, "search3", proxy::search::search3_handler);

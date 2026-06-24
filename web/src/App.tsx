@@ -8,7 +8,13 @@ import {
   validateSession,
   type WaveSession,
 } from "./auth";
-import { FriendsPanel, NowPlayingBar, NowPlayingScreen, PlayBar } from "./components";
+import {
+  DiscordConnectToggle,
+  FriendsPanel,
+  NowPlayingBar,
+  NowPlayingScreen,
+  PlayBar,
+} from "./components";
 import { LibraryIcon, PlaylistIcon, SearchIcon, WaveIcon } from "./icons";
 import { DownloadsProvider } from "./downloads";
 import { NavProvider, useNav, type Route, type TabName } from "./nav";
@@ -198,22 +204,25 @@ function DesktopSidebar({
         })}
       </nav>
 
-      <div className="mt-auto rounded-xl border border-white/10 bg-white/[0.04] p-3">
-        <div className="mb-3 flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-wave-orange to-wave-violet text-sm font-bold text-white">
-            {session.username.slice(0, 1).toUpperCase()}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-sm font-bold">
-            {session.username}
-          </span>
+      <div className="mt-auto space-y-3">
+        <DiscordConnectToggle />
+        <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+          <div className="mb-3 flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-wave-orange to-wave-violet text-sm font-bold text-white">
+              {session.username.slice(0, 1).toUpperCase()}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm font-bold">
+              {session.username}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={onLogout}
+            className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm font-bold text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
+          >
+            Log out
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={onLogout}
-          className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm font-bold text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
-        >
-          Log out
-        </button>
       </div>
     </aside>
   );

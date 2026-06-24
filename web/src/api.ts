@@ -4,7 +4,15 @@
 // the same plain Subsonic calls surface external content for free.
 
 import { apiUrl, authQuery, type WaveSession } from "./auth";
-import type { Album, Artist, FriendActivity, LyricsResult, Playlist, Song } from "./types";
+import type {
+  Album,
+  Artist,
+  FriendActivity,
+  LyricsResult,
+  Playlist,
+  RemoteState,
+  Song,
+} from "./types";
 
 const ARTIST_COVER_CACHE_VERSION = "songarr.wave.artistCovers.v1";
 
@@ -504,4 +512,65 @@ export async function getFriends(session: WaveSession): Promise<FriendActivity[]
     song: toSong(raw),
     updatedAt: raw.updatedAt ?? 0,
   }));
+}
+
+// ---- Remote control (drive the Discord bot) ----
+
+/** Queue a remote command for the bot (connect/disconnect/play/pause/…). */
+export async function remoteCommand(
+  session: WaveSession,
+  action: string,
+  payload?: unknown,
+): Promise<void> {
+  const response = await fetch(
+    apiUrl(session, `/wave/api/remote/command?${authQuery(session)}`),
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ action, payload: payload ?? null }),
+    },
+  );
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+type RawRemoteState = {
+  connected?: boolean;
+  trackId?: string;
+  title?: string;
+  artist?: string;
+  album?: string;
+  coverArt?: string;
+  positionMs?: number;
+  durationMs?: number;
+  isPlaying?: boolean;
+  queue?: RawSong[];
+  updatedAt?: number;
+};
+
+/** The bot's reported playback (for the remote playbar). */
+export async function getRemoteState(session: WaveSession): Promise<RemoteState> {
+  const response = await fetch(apiUrl(session, `/wave/api/remote/state?${authQuery(session)}`), {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const raw = (await response.json()) as RawRemoteState;
+  const song = raw.trackId
+    ? toSong({
+        id: raw.trackId,
+        title: raw.title,
+        artist: raw.artist,
+        album: raw.album,
+        coverArt: raw.coverArt,
+      })
+    : null;
+  return {
+    connected: Boolean(raw.connected),
+    song,
+    positionMs: raw.positionMs ?? undefined,
+    durationMs: raw.durationMs ?? undefined,
+    isPlaying: Boolean(raw.isPlaying),
+    queue: (raw.queue ?? []).map(toSong),
+    updatedAt: raw.updatedAt ?? 0,
+    fetchedAt: Date.now(),
+  };
 }
