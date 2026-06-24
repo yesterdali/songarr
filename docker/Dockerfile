@@ -37,7 +37,7 @@ FROM debian:bookworm-slim
 # yt-dlp's release binary is a python3 zipapp; ffmpeg/ffprobe from the distro.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-pip ffmpeg \
-    && pip3 install --no-cache-dir --break-system-packages yandex-music vk_api \
+    && pip3 install --no-cache-dir --break-system-packages yandex-music vkaudiotoken \
     && curl -fsSL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
          -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp \
