@@ -163,13 +163,10 @@ impl<'a> SongarrClient<'a> {
             .unwrap_or_default())
     }
 
-    /// MP3 stream URL — symphonia decodes MP3 reliably, and songbird re-encodes
-    /// to Opus for Discord anyway.
+    /// Stream URL for Songbird. Avoid forcing an MP3 transcode here: Discord
+    /// voice will re-encode to Opus anyway, so an extra lossy hop only hurts.
     pub fn stream_url(&self, track: &Track) -> String {
-        self.build_url(
-            "/rest/stream",
-            &[("id", &track.id), ("format", "mp3"), ("maxBitRate", "320")],
-        )
+        self.build_url("/rest/stream", &[("id", &track.id)])
     }
 
     /// Remote control: pull commands the app queued for this user (seq > after).
