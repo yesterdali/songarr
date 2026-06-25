@@ -773,28 +773,35 @@ function timeAgo(epochSecs: number): string {
 /** Sidebar toggle: hand playback to the Discord bot (Vivaldi) and back. While
  *  connected, the app is a remote — the playbar drives the bot. */
 export function DiscordConnectToggle() {
-  const { remoteOn, remoteConnected, connectRemote, disconnectRemote } = usePlayer();
-  const label = remoteOn
-    ? remoteConnected
-      ? "Vivaldi · подключено"
-      : "Подключаюсь…"
-    : "Слушать в Discord";
+  const { remoteOn, remoteConnected, remoteBusy, connectRemote, disconnectRemote } = usePlayer();
+  const label = !remoteOn
+    ? "Слушать в Discord"
+    : remoteBusy
+      ? "Vivaldi занят"
+      : remoteConnected
+        ? "Vivaldi · подключено"
+        : "Подключаюсь…";
+  const accent = remoteBusy
+    ? "border-amber-500/40 bg-amber-500/10 text-amber-400"
+    : remoteOn
+      ? "border-wave-pink/30 bg-wave-pink/10 text-wave-pink"
+      : "border-white/10 text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200";
   return (
     <button
       type="button"
       onClick={() => (remoteOn ? disconnectRemote() : connectRemote())}
-      className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition active:scale-[0.98] ${
-        remoteOn
-          ? "border-wave-pink/30 bg-wave-pink/10 text-wave-pink"
-          : "border-white/10 text-neutral-400 hover:bg-white/[0.04] hover:text-neutral-200"
-      }`}
+      className={`flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm font-bold transition active:scale-[0.98] ${accent}`}
     >
       <CastIcon className="h-5 w-5 shrink-0" />
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {remoteOn && (
         <span
           className={`h-2 w-2 shrink-0 rounded-full ${
-            remoteConnected ? "bg-green-400" : "animate-pulse bg-amber-400"
+            remoteBusy
+              ? "bg-amber-400"
+              : remoteConnected
+                ? "bg-green-400"
+                : "animate-pulse bg-amber-400"
           }`}
         />
       )}

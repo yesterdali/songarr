@@ -65,6 +65,8 @@ export type FriendActivity = {
 // The Discord bot's reported playback, for remote control.
 export type RemoteState = {
   connected: boolean;
+  /** Bot is in use in another voice channel of this server. */
+  busy: boolean;
   song: Song | null;
   positionMs?: number;
   durationMs?: number;

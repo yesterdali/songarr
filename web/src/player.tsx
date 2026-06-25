@@ -58,6 +58,8 @@ type PlayerValue = {
   remoteOn: boolean;
   /** True once the bot has actually joined voice (fresh heartbeat). */
   remoteConnected: boolean;
+  /** Bot is busy in another voice channel of the server. */
+  remoteBusy: boolean;
   connectRemote: () => void;
   disconnectRemote: () => void;
   playQueue: (songs: Song[], startIndex?: number) => void;
@@ -680,6 +682,7 @@ export function PlayerProvider({
     : queue;
   const exposedIndex = remoteOn ? 0 : index;
   const remoteConnected = remoteState?.connected ?? false;
+  const remoteBusy = remoteOn && (remoteState?.busy ?? false);
 
   const value = useMemo<PlayerValue>(
     () => ({
@@ -695,6 +698,7 @@ export function PlayerProvider({
       shuffle,
       remoteOn,
       remoteConnected,
+      remoteBusy,
       connectRemote,
       disconnectRemote,
       playQueue,
@@ -723,6 +727,7 @@ export function PlayerProvider({
       shuffle,
       remoteOn,
       remoteConnected,
+      remoteBusy,
       connectRemote,
       disconnectRemote,
       playQueue,

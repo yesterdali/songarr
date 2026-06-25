@@ -433,8 +433,8 @@ pub async fn remote_state_report_handler(
     let result = sqlx::query(
         "INSERT INTO remote_state
             (username, connected, track_id, title, artist, album, cover_art,
-             position_ms, duration_ms, is_playing, queue_json, updated_at_epoch, rev)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+             position_ms, duration_ms, is_playing, queue_json, updated_at_epoch, busy, rev)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
          ON CONFLICT(username) DO UPDATE SET
             connected = excluded.connected,
             track_id = excluded.track_id,
@@ -447,6 +447,7 @@ pub async fn remote_state_report_handler(
             is_playing = excluded.is_playing,
             queue_json = excluded.queue_json,
             updated_at_epoch = excluded.updated_at_epoch,
+            busy = excluded.busy,
             rev = rev + 1",
     )
     .bind(&username)
@@ -461,6 +462,7 @@ pub async fn remote_state_report_handler(
     .bind(body.is_playing as i64)
     .bind(&queue_json)
     .bind(now)
+    .bind(body.busy as i64)
     .execute(&state.db)
     .await;
     // Keep Friend Activity in sync: a remote play is still this user's "now
@@ -503,7 +505,7 @@ pub async fn remote_state_report_handler(
 async fn fetch_remote_state(db: &sqlx::SqlitePool, username: &str) -> Option<RemoteStateRow> {
     sqlx::query_as::<_, RemoteStateRow>(
         "SELECT connected, track_id, title, artist, album, cover_art,
-                position_ms, duration_ms, is_playing, queue_json, updated_at_epoch, rev
+                position_ms, duration_ms, is_playing, queue_json, updated_at_epoch, busy, rev
          FROM remote_state WHERE username = ?",
     )
     .bind(username)
@@ -554,6 +556,7 @@ pub async fn remote_state_handler(
                     .and_then(|q| serde_json::from_str::<serde_json::Value>(&q).ok()),
                 updated_at: r.updated_at_epoch,
                 rev: r.rev,
+                busy: alive && r.busy != 0,
             }
         }
         None => RemoteStateResponse {
@@ -601,6 +604,8 @@ pub struct RemoteStateReport {
     is_playing: bool,
     #[serde(default)]
     queue: Option<serde_json::Value>,
+    #[serde(default)]
+    busy: bool,
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -616,6 +621,7 @@ struct RemoteStateRow {
     is_playing: i64,
     queue_json: Option<String>,
     updated_at_epoch: i64,
+    busy: i64,
     rev: i64,
 }
 
@@ -634,6 +640,7 @@ struct RemoteStateResponse {
     queue: Option<serde_json::Value>,
     updated_at: i64,
     rev: i64,
+    busy: bool,
 }
 
 /// Ingest a pasted YouTube/Yandex/VK link into a virtual track, returning a

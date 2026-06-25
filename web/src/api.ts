@@ -535,6 +535,7 @@ export async function remoteCommand(
 
 type RawRemoteState = {
   connected?: boolean;
+  busy?: boolean;
   trackId?: string;
   title?: string;
   artist?: string;
@@ -574,6 +575,7 @@ export async function getRemoteState(
     : null;
   return {
     connected: Boolean(raw.connected),
+    busy: Boolean(raw.busy),
     song,
     positionMs: raw.positionMs ?? undefined,
     durationMs: raw.durationMs ?? undefined,
