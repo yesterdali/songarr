@@ -233,6 +233,25 @@ export function CastIcon({ className = "" }: IconProps) {
   );
 }
 
+export function VolumeIcon({ className = "", muted = false }: IconProps & { muted?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" {...strokeProps} className={className}>
+      <path d="M4 9v6h4l5 4V5L8 9H4z" />
+      {muted ? (
+        <>
+          <path d="m18 9 4 4" />
+          <path d="m22 9-4 4" />
+        </>
+      ) : (
+        <>
+          <path d="M16 9.5a4 4 0 0 1 0 5" />
+          <path d="M18.5 7a7 7 0 0 1 0 10" />
+        </>
+      )}
+    </svg>
+  );
+}
+
 export function SettingsIcon({ className = "" }: IconProps) {
   return (
     <svg viewBox="0 0 24 24" {...strokeProps} className={className}>

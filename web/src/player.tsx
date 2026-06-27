@@ -68,6 +68,8 @@ type PlayerValue = {
   isWave: boolean;
   repeat: RepeatMode;
   shuffle: boolean;
+  volume: number;
+  muted: boolean;
   /** Remote control: true while the app is driving the Discord bot. */
   remoteOn: boolean;
   /** True once the bot has actually joined voice (fresh heartbeat). */
@@ -93,6 +95,8 @@ type PlayerValue = {
   seek: (seconds: number) => void;
   cycleRepeat: () => void;
   toggleShuffle: () => void;
+  setVolume: (value: number) => void;
+  toggleMute: () => void;
   isStarred: (id: string) => boolean;
   toggleStar: (id: string) => void;
   dislikeCurrent: () => void;
@@ -110,6 +114,14 @@ export function usePlayer(): PlayerValue {
 function audioDuration(audio: HTMLAudioElement, fallback?: number): number {
   if (Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration;
   return fallback && Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
+}
+
+const VOLUME_KEY = "songarr.wave.volume.v1";
+
+function loadVolume(): number {
+  const raw = localStorage.getItem(VOLUME_KEY);
+  const parsed = raw ? Number(raw) : 0.85;
+  return Number.isFinite(parsed) ? clamp(parsed, 0, 1) : 0.85;
 }
 
 export function PlayerProvider({
@@ -139,6 +151,8 @@ export function PlayerProvider({
   const [isWave, setIsWave] = useState(false);
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
+  const [volume, setVolumeState] = useState(loadVolume);
+  const [muted, setMuted] = useState(false);
   // Remote control (Spotify-Connect-style: app drives the Discord bot).
   const [remoteOn, setRemoteOn] = useState(false);
   const [remoteState, setRemoteState] = useState<RemoteState | null>(null);
@@ -152,6 +166,7 @@ export function PlayerProvider({
   const [listenCode, setListenCode] = useState<string | null>(null);
   const [listenState, setListenState] = useState<ListenState | null>(null);
   const [listenClockOffsetMs, setListenClockOffsetMs] = useState(0);
+  const [, setListenNeedsUnlock] = useState(false);
   const listenCodeRef = useRef<string | null>(null);
   const listenStateRef = useRef<ListenState | null>(null);
   listenCodeRef.current = listenCode;
@@ -245,11 +260,13 @@ export function PlayerProvider({
       if (preloads.size >= 2) return;
       const audio = new Audio();
       audio.preload = "auto";
+      audio.volume = volume;
+      audio.muted = muted;
       audio.src = song.streamUrl ?? streamUrl(session, song.id);
       audio.load();
       preloads.set(song.id, audio);
     },
-    [session],
+    [muted, session, volume],
   );
 
   const advance = useCallback(
@@ -381,6 +398,8 @@ export function PlayerProvider({
   useEffect(() => {
     const audio = new Audio();
     audio.preload = "auto";
+    audio.volume = volume;
+    audio.muted = muted;
     attach(audio);
     return () => {
       detachRef.current?.();
@@ -392,6 +411,15 @@ export function PlayerProvider({
       preloadsRef.current.clear();
     };
   }, [attach]);
+
+  useEffect(() => {
+    localStorage.setItem(VOLUME_KEY, String(volume));
+    for (const audio of [audioRef.current, ...preloadsRef.current.values()]) {
+      if (!audio) continue;
+      audio.volume = volume;
+      audio.muted = muted;
+    }
+  }, [muted, volume]);
 
   // Load + play whenever the current track changes; if the track was already
   // preloaded, swap elements and start instantly.
@@ -408,6 +436,7 @@ export function PlayerProvider({
       }
       if (!listenCodeRef.current || listenStateRef.current?.isPlaying) {
         preloaded.play().catch(() => {
+          if (listenCodeRef.current) setListenNeedsUnlock(true);
           /* autoplay/gesture rejection — the UI play button recovers */
         });
       } else {
@@ -428,6 +457,7 @@ export function PlayerProvider({
       audio.load();
       if (!listenCodeRef.current || listenStateRef.current?.isPlaying) {
         audio.play().catch(() => {
+          if (listenCodeRef.current) setListenNeedsUnlock(true);
           /* autoplay/gesture rejection — the UI play button recovers */
         });
       }
@@ -639,8 +669,12 @@ export function PlayerProvider({
         audio.playbackRate = 1;
       }
       if (state.isPlaying) {
-        audio.play().catch(() => undefined);
+        audio
+          .play()
+          .then(() => setListenNeedsUnlock(false))
+          .catch(() => setListenNeedsUnlock(true));
       } else {
+        setListenNeedsUnlock(false);
         audio.pause();
       }
     };
@@ -714,6 +748,16 @@ export function PlayerProvider({
     }
   }, []);
 
+  const setVolume = useCallback((value: number) => {
+    const next = clamp(value, 0, 1);
+    setVolumeState(next);
+    if (next > 0) setMuted(false);
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    setMuted((value) => !value);
+  }, []);
+
   const playQueue = useCallback(
     (songs: Song[], startIndex = 0) => {
       if (songs.length === 0) return;
@@ -722,6 +766,35 @@ export function PlayerProvider({
         return;
       }
       if (listenCodeRef.current) {
+        const safeIndex = Math.min(Math.max(startIndex, 0), songs.length - 1);
+        const selected = songs[safeIndex];
+        setIsWave(false);
+        setShuffle(false);
+        preShuffleRef.current = null;
+        setQueue(songs);
+        setIndex(safeIndex);
+        setListenState((state) =>
+          state
+            ? {
+                ...state,
+                track: selected,
+                queue: songs.slice(safeIndex + 1),
+                anchorPosMs: 0,
+                anchorTsMs: Date.now() + listenClockOffsetMs,
+                isPlaying: true,
+                rev: state.rev + 1,
+              }
+            : state,
+        );
+        const audio = audioRef.current;
+        if (audio) {
+          audio.src = selected.streamUrl ?? streamUrl(session, selected.id);
+          audio.load();
+          audio
+            .play()
+            .then(() => setListenNeedsUnlock(false))
+            .catch(() => setListenNeedsUnlock(true));
+        }
         dispatchListen("play", { tracks: songs.map(toRemoteTrack), startIndex });
         return;
       }
@@ -731,7 +804,7 @@ export function PlayerProvider({
       setQueue(songs);
       setIndex(Math.min(Math.max(startIndex, 0), songs.length - 1));
     },
-    [dispatchListen, dispatchRemote],
+    [dispatchListen, dispatchRemote, listenClockOffsetMs, session],
   );
 
   const connectRemote = useCallback(() => {
@@ -837,6 +910,14 @@ export function PlayerProvider({
       return;
     }
     if (listenCodeRef.current) {
+      const audio = audioRef.current;
+      if (listenStateRef.current?.isPlaying && audio?.paused) {
+        audio
+          .play()
+          .then(() => setListenNeedsUnlock(false))
+          .catch(() => setListenNeedsUnlock(true));
+        return;
+      }
       const playing = listenStateRef.current?.isPlaying ?? isPlaying;
       dispatchListen(playing ? "pause" : "resume");
       return;
@@ -947,6 +1028,8 @@ export function PlayerProvider({
       isWave,
       repeat,
       shuffle,
+      volume,
+      muted,
       remoteOn,
       remoteConnected,
       remoteBusy,
@@ -968,6 +1051,8 @@ export function PlayerProvider({
       seek,
       cycleRepeat,
       toggleShuffle,
+      setVolume,
+      toggleMute,
       isStarred,
       toggleStar,
       dislikeCurrent,
@@ -984,6 +1069,8 @@ export function PlayerProvider({
       isWave,
       repeat,
       shuffle,
+      volume,
+      muted,
       remoteOn,
       remoteConnected,
       remoteBusy,
@@ -1005,6 +1092,8 @@ export function PlayerProvider({
       seek,
       cycleRepeat,
       toggleShuffle,
+      setVolume,
+      toggleMute,
       isStarred,
       toggleStar,
       dislikeCurrent,

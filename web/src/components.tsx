@@ -17,6 +17,7 @@ import {
   RepeatOneIcon,
   SettingsIcon,
   ShuffleIcon,
+  VolumeIcon,
 } from "./icons";
 import { avatarUrl, getFriends, getLyrics, getProfile } from "./api";
 import { useDownloads } from "./downloads";
@@ -1133,12 +1134,16 @@ export function PlayBar({ onOpen }: { onOpen: () => void }) {
     repeat,
     shuffle,
     remoteOn,
+    volume,
+    muted,
     toggle,
     next,
     prev,
     seek,
     cycleRepeat,
     toggleShuffle,
+    setVolume,
+    toggleMute,
     isStarred,
     toggleStar,
   } = usePlayer();
@@ -1146,6 +1151,7 @@ export function PlayBar({ onOpen }: { onOpen: () => void }) {
   const displayDuration = duration || current.duration || 0;
   const displayTime = displayDuration ? Math.min(currentTime, displayDuration) : currentTime;
   const progress = displayDuration ? Math.min((displayTime / displayDuration) * 100, 100) : 0;
+  const effectiveVolume = muted ? 0 : volume;
   return (
     <div className="hidden border-t border-wave-pink/15 bg-[#0d070b]/95 px-4 py-2.5 text-white backdrop-blur-2xl lg:block">
       <div className="mx-auto grid max-w-[1500px] grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-4">
@@ -1257,6 +1263,29 @@ export function PlayBar({ onOpen }: { onOpen: () => void }) {
 
         {/* Right: download + open */}
         <div className="flex items-center justify-end gap-2">
+          <div className="hidden items-center gap-2 rounded-full bg-white/[0.04] px-2.5 py-1.5 ring-1 ring-white/10 xl:flex">
+            <button
+              type="button"
+              aria-label={muted || volume === 0 ? "unmute" : "mute"}
+              onClick={toggleMute}
+              className="grid h-7 w-7 place-items-center rounded-full text-neutral-300 transition hover:bg-white/[0.06] hover:text-white active:scale-95"
+            >
+              <VolumeIcon className="h-5 w-5" muted={muted || volume === 0} />
+            </button>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.01}
+              value={effectiveVolume}
+              onChange={(event) => setVolume(Number(event.target.value))}
+              aria-label="volume"
+              className="h-1.5 w-24 accent-wave-pink"
+            />
+            <span className="w-8 text-right text-[11px] font-bold tabular-nums text-neutral-500">
+              {Math.round(effectiveVolume * 100)}
+            </span>
+          </div>
           <DownloadButton song={current} className="h-9 w-9" />
           <button
             type="button"
