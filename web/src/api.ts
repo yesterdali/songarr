@@ -8,6 +8,7 @@ import type {
   Album,
   Artist,
   FriendActivity,
+  ListenState,
   LyricsResult,
   Playlist,
   Profile,
@@ -560,6 +561,146 @@ export async function removeAvatar(session: WaveSession): Promise<void> {
     headers: { Accept: "application/json" },
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+// ---- Listen Together ----
+
+type RawListenTrack = {
+  id: string;
+  title?: string;
+  artist?: string;
+  provider?: string;
+  artistId?: string;
+  album?: string;
+  albumId?: string;
+  coverArt?: string;
+  durationMs?: number;
+};
+
+type RawListenState = {
+  code: string;
+  host: string;
+  isHost?: boolean;
+  members?: { username: string; displayName?: string }[];
+  track?: RawListenTrack | null;
+  queue?: RawListenTrack[];
+  events?: { id?: number; username?: string; kind?: string; text?: string; atMs?: number }[];
+  anchorPosMs?: number;
+  anchorTsMs?: number;
+  isPlaying?: boolean;
+  rev?: number;
+  gone?: boolean;
+};
+
+function listenTrackToSong(raw: RawListenTrack): Song {
+  return toSong({
+    id: raw.id,
+    title: raw.title,
+    artist: raw.artist,
+    provider: raw.provider,
+    artistId: raw.artistId,
+    album: raw.album,
+    albumId: raw.albumId,
+    coverArt: raw.coverArt,
+    durationSecs: raw.durationMs ? Math.round(raw.durationMs / 1000) : undefined,
+  });
+}
+
+function listenStateFromRaw(raw: RawListenState): ListenState {
+  return {
+    code: raw.code,
+    host: raw.host,
+    isHost: Boolean(raw.isHost),
+    members: (raw.members ?? []).map((m) => ({ username: m.username, displayName: m.displayName })),
+    track: raw.track ? listenTrackToSong(raw.track) : null,
+    queue: (raw.queue ?? []).map(listenTrackToSong),
+    events: (raw.events ?? [])
+      .map((event) => ({
+        id: event.id ?? 0,
+        username: event.username ?? "",
+        kind: event.kind ?? "chat",
+        text: event.text ?? "",
+        atMs: event.atMs ?? 0,
+      }))
+      .filter((event) => event.username && event.text),
+    anchorPosMs: raw.anchorPosMs ?? 0,
+    anchorTsMs: raw.anchorTsMs ?? 0,
+    isPlaying: Boolean(raw.isPlaying),
+    rev: raw.rev ?? 0,
+  };
+}
+
+/** Server clock (epoch ms) for offset estimation. */
+export async function getServerTime(session: WaveSession): Promise<number> {
+  const response = await fetch(apiUrl(session, `/wave/api/time?${authQuery(session)}`), {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = (await response.json()) as { serverMs?: number };
+  return body.serverMs ?? Date.now();
+}
+
+export async function createListen(session: WaveSession): Promise<string> {
+  const response = await fetch(apiUrl(session, `/wave/api/listen/create?${authQuery(session)}`), {
+    method: "POST",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const body = (await response.json()) as { code: string };
+  return body.code;
+}
+
+export async function joinListen(session: WaveSession, code: string): Promise<ListenState> {
+  const response = await fetch(apiUrl(session, `/wave/api/listen/join?${authQuery(session)}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  if (!response.ok) throw new Error(response.status === 404 ? "Комната не найдена" : `HTTP ${response.status}`);
+  return listenStateFromRaw((await response.json()) as RawListenState);
+}
+
+export async function leaveListen(session: WaveSession, code: string): Promise<void> {
+  await fetch(apiUrl(session, `/wave/api/listen/leave?${authQuery(session)}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ code }),
+  }).catch(() => undefined);
+}
+
+export async function getListenState(
+  session: WaveSession,
+  opts: { code: string; since?: number; wait?: number; signal?: AbortSignal },
+): Promise<ListenState | null> {
+  const query = new URLSearchParams(authQuery(session));
+  query.set("code", opts.code);
+  if (opts.since) query.set("since", String(opts.since));
+  if (opts.wait) query.set("wait", String(opts.wait));
+  const response = await fetch(apiUrl(session, `/wave/api/listen/state?${query.toString()}`), {
+    headers: { Accept: "application/json" },
+    signal: opts.signal,
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const raw = (await response.json()) as RawListenState;
+  if (raw.gone) return null;
+  return listenStateFromRaw(raw);
+}
+
+export async function listenCommand(
+  session: WaveSession,
+  code: string,
+  action: string,
+  payload?: unknown,
+): Promise<void> {
+  const query = new URLSearchParams(authQuery(session));
+  query.set("code", code);
+  await fetch(apiUrl(session, `/wave/api/listen/command?${query.toString()}`), {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ action, payload: payload ?? null }),
+  }).then((response) => {
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  });
 }
 
 // ---- Remote control (drive the Discord bot) ----

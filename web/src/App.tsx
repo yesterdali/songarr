@@ -13,6 +13,7 @@ import {
   Avatar,
   DiscordConnectToggle,
   FriendsPanel,
+  ListenTogetherPanel,
   NowPlayingBar,
   NowPlayingScreen,
   PlayBar,
@@ -183,6 +184,7 @@ function DesktopSidebar({ activeTab }: { activeTab: TabName }) {
       <div className="mb-6 space-y-3">
         <AccountButton />
         <DiscordConnectToggle />
+        <ListenTogetherPanel />
       </div>
 
       <nav className="space-y-1">
@@ -248,6 +250,11 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
                       <Avatar username={session.username} className="h-9 w-9" />
                     </button>
                   </header>
+                )}
+                {route.name === "home" && (
+                  <div className="mb-5 lg:hidden">
+                    <ListenTogetherPanel />
+                  </div>
                 )}
                 <CurrentScreen route={route} onLogout={onLogout} />
               </div>

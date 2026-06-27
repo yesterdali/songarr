@@ -32,6 +32,7 @@ async fn main() -> anyhow::Result<()> {
     let upstream = config.navidrome.base_url.clone();
     let state = AppState::new(config, db)?;
     tokio::spawn(songarr_proxy::ingest::worker(state.clone()));
+    tokio::spawn(songarr_proxy::proxy::wave::listen_sweeper(state.clone()));
     let app = build_app(state);
 
     let listener = tokio::net::TcpListener::bind(&bind).await?;

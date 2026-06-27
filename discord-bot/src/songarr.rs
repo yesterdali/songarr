@@ -37,7 +37,9 @@ impl Track {
 pub fn make_link(server_url: &str, username: &str, password: &str) -> Link {
     let salt: String = {
         let mut rng = rand::thread_rng();
-        (0..16).map(|_| format!("{:x}", rng.gen_range(0..16))).collect()
+        (0..16)
+            .map(|_| format!("{:x}", rng.gen_range(0..16)))
+            .collect()
     };
     let token = format!("{:x}", md5::compute(format!("{password}{salt}")));
     Link {
@@ -111,7 +113,13 @@ impl<'a> SongarrClient<'a> {
     pub async fn search_song(&self, query: &str) -> anyhow::Result<Option<Track>> {
         let url = self.build_url(
             "/rest/search3",
-            &[("f", "json"), ("query", query), ("songCount", "1"), ("albumCount", "0"), ("artistCount", "0")],
+            &[
+                ("f", "json"),
+                ("query", query),
+                ("songCount", "1"),
+                ("albumCount", "0"),
+                ("artistCount", "0"),
+            ],
         );
         let body = self.get_json(&url).await?;
         let song = body.pointer("/subsonic-response/searchResult3/song");
@@ -140,7 +148,11 @@ impl<'a> SongarrClient<'a> {
             let detail = body.trim();
             return Err(anyhow!(
                 "{}",
-                if detail.is_empty() { status.to_string() } else { detail.to_string() }
+                if detail.is_empty() {
+                    status.to_string()
+                } else {
+                    detail.to_string()
+                }
             ));
         }
         let body: serde_json::Value = response.json().await?;
@@ -172,7 +184,11 @@ impl<'a> SongarrClient<'a> {
     /// Remote control: pull commands the app queued for this user (seq > after).
     /// `wait` (secs) long-polls — the request blocks until a command arrives or
     /// the timeout, so control reaches the bot near-instantly.
-    pub async fn remote_commands(&self, after: i64, wait: u64) -> anyhow::Result<Vec<RemoteCommand>> {
+    pub async fn remote_commands(
+        &self,
+        after: i64,
+        wait: u64,
+    ) -> anyhow::Result<Vec<RemoteCommand>> {
         let after = after.to_string();
         let wait = wait.to_string();
         let url = self.build_url(
@@ -181,7 +197,11 @@ impl<'a> SongarrClient<'a> {
         );
         let response = self.http.get(&url).send().await?.error_for_status()?;
         let body: serde_json::Value = response.json().await?;
-        let commands = body.get("commands").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+        let commands = body
+            .get("commands")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
         Ok(commands
             .into_iter()
             .filter_map(|c| serde_json::from_value(c).ok())
@@ -191,7 +211,12 @@ impl<'a> SongarrClient<'a> {
     /// Remote control: report current playback state (also a heartbeat).
     pub async fn remote_report_state(&self, state: &serde_json::Value) -> anyhow::Result<()> {
         let url = self.build_url("/wave/api/remote/state", &[]);
-        self.http.post(&url).json(state).send().await?.error_for_status()?;
+        self.http
+            .post(&url)
+            .json(state)
+            .send()
+            .await?
+            .error_for_status()?;
         Ok(())
     }
 }
@@ -215,7 +240,10 @@ fn join_path(base: &str, path: &str) -> String {
     format!("{prefix}{suffix}")
 }
 
-pub fn require_server<'a>(provided: Option<&'a str>, default: Option<&'a str>) -> anyhow::Result<&'a str> {
+pub fn require_server<'a>(
+    provided: Option<&'a str>,
+    default: Option<&'a str>,
+) -> anyhow::Result<&'a str> {
     provided
         .or(default)
         .context("no Songarr URL — pass one to /link or set SONGARR_URL on the bot")

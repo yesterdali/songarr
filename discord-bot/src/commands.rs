@@ -28,8 +28,12 @@ async fn user_link(ctx: Context<'_>) -> Result<Link, Error> {
 }
 
 async fn reply_ephemeral(ctx: Context<'_>, content: impl Into<String>) -> Result<(), Error> {
-    ctx.send(poise::CreateReply::default().ephemeral(true).content(content.into()))
-        .await?;
+    ctx.send(
+        poise::CreateReply::default()
+            .ephemeral(true)
+            .content(content.into()),
+    )
+    .await?;
     Ok(())
 }
 
@@ -62,7 +66,11 @@ async fn unlink(ctx: Context<'_>) -> Result<(), Error> {
     let removed = store::delete_link(&ctx.data().db, ctx.author().id.get()).await?;
     reply_ephemeral(
         ctx,
-        if removed { "Аккаунт отвязан." } else { "Привязки и не было." },
+        if removed {
+            "Аккаунт отвязан."
+        } else {
+            "Привязки и не было."
+        },
     )
     .await
 }
@@ -99,7 +107,14 @@ async fn play(
     let label = track.label();
 
     let (_, _, call) = join_user_channel(ctx).await?;
-    enqueue(&call, &ctx.data().stream_http, url, label.clone(), &ctx.data().labels).await;
+    enqueue(
+        &call,
+        &ctx.data().stream_http,
+        url,
+        label.clone(),
+        &ctx.data().labels,
+    )
+    .await;
     ctx.say(format!("▶️ В очередь: **{label}**")).await?;
     Ok(())
 }
@@ -114,14 +129,21 @@ async fn wave(ctx: Context<'_>) -> Result<(), Error> {
     let client = SongarrClient::new(&http, &link);
     let tracks = client.wave_next(None, 12).await?;
     if tracks.is_empty() {
-        ctx.say("Волна пока пустая — послушай что-нибудь, чтобы её настроить.").await?;
+        ctx.say("Волна пока пустая — послушай что-нибудь, чтобы её настроить.")
+            .await?;
         return Ok(());
     }
 
     let (manager, guild_id, call) = join_user_channel(ctx).await?;
     for track in &tracks {
-        enqueue(&call, &ctx.data().stream_http, client.stream_url(track), track.label(), &ctx.data().labels)
-            .await;
+        enqueue(
+            &call,
+            &ctx.data().stream_http,
+            client.stream_url(track),
+            track.label(),
+            &ctx.data().labels,
+        )
+        .await;
     }
     install_wave_refiller(
         &call,
@@ -133,8 +155,11 @@ async fn wave(ctx: Context<'_>) -> Result<(), Error> {
         ctx.data().labels.clone(),
     )
     .await;
-    ctx.say(format!("🌊 Твоя волна пошла — {} треков в очереди, дальше бесконечно.", tracks.len()))
-        .await?;
+    ctx.say(format!(
+        "🌊 Твоя волна пошла — {} треков в очереди, дальше бесконечно.",
+        tracks.len()
+    ))
+    .await?;
     Ok(())
 }
 

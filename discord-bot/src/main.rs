@@ -71,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let test_guild = config.test_guild;
+    let voice_bitrate_kbps = config.voice_bitrate_kbps;
     // Clones for the remote-control loop (data is moved into setup below). The
     // long-poll needs the no-total-timeout client so a 20s wait doesn't abort.
     let remote_db = data.db.clone();
@@ -79,7 +80,12 @@ async fn main() -> anyhow::Result<()> {
         .options(options)
         .setup(move |ctx, ready, framework| {
             Box::pin(async move {
-                tokio::spawn(remote::run(ctx.clone(), remote_db, remote_http));
+                tokio::spawn(remote::run(
+                    ctx.clone(),
+                    remote_db,
+                    remote_http,
+                    voice_bitrate_kbps,
+                ));
                 let count = framework.options().commands.len();
                 match test_guild {
                     Some(id) => {
@@ -109,8 +115,8 @@ async fn main() -> anyhow::Result<()> {
         })
         .build();
 
-    let intents = serenity::GatewayIntents::non_privileged()
-        | serenity::GatewayIntents::GUILD_VOICE_STATES;
+    let intents =
+        serenity::GatewayIntents::non_privileged() | serenity::GatewayIntents::GUILD_VOICE_STATES;
 
     let mut client = serenity::ClientBuilder::new(&config.token, intents)
         .framework(framework)

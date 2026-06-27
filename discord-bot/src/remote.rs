@@ -15,6 +15,7 @@ use serenity::{ChannelId, GuildId, UserId};
 use songbird::input::HttpRequest;
 use tokio::sync::Mutex;
 
+use crate::playback::set_music_bitrate;
 use crate::songarr::{SongarrClient, Track};
 
 const COMMAND_WAIT_SECS: u64 = 20;
@@ -63,7 +64,11 @@ impl TrackMeta {
     }
 
     fn track(&self) -> Track {
-        Track { id: self.id.clone(), title: self.title.clone(), artist: self.artist.clone() }
+        Track {
+            id: self.id.clone(),
+            title: self.title.clone(),
+            artist: self.artist.clone(),
+        }
     }
 }
 
@@ -100,7 +105,12 @@ enum Status {
 }
 
 /// Supervisor: shared rooms + a watchdog + one long-poll task per linked user.
-pub async fn run(ctx: serenity::Context, db: sqlx::SqlitePool, http: reqwest::Client) {
+pub async fn run(
+    ctx: serenity::Context,
+    db: sqlx::SqlitePool,
+    http: reqwest::Client,
+    voice_bitrate_kbps: u32,
+) {
     tracing::info!("remote-control supervisor started");
     let rooms: Rooms = Arc::new(Mutex::new(HashMap::new()));
     tokio::spawn(watchdog(ctx.clone(), rooms.clone()));
@@ -116,6 +126,7 @@ pub async fn run(ctx: serenity::Context, db: sqlx::SqlitePool, http: reqwest::Cl
                         link,
                         http.clone(),
                         rooms.clone(),
+                        voice_bitrate_kbps,
                     ));
                 }
             }
@@ -130,6 +141,7 @@ async fn user_loop(
     link: crate::store::Link,
     http: reqwest::Client,
     rooms: Rooms,
+    voice_bitrate_kbps: u32,
 ) {
     let client = SongarrClient::new(&http, &link);
     let mut last_seq: i64 = 0;
@@ -141,18 +153,18 @@ async fn user_loop(
                     Ok(commands) => {
                         for command in &commands {
                             handle_command(&ctx, &client, &http, &rooms, discord_id,
-                                &mut active, command).await;
+                                &mut active, command, voice_bitrate_kbps).await;
                             last_seq = command.seq.max(last_seq);
                         }
                         if active && !commands.is_empty() {
-                            report_state(&ctx, &client, &http, &rooms, discord_id).await;
+                            report_state(&ctx, &client, &http, &rooms, discord_id, voice_bitrate_kbps).await;
                         }
                     }
                     Err(_) => tokio::time::sleep(Duration::from_secs(2)).await,
                 }
             }
             _ = tokio::time::sleep(Duration::from_secs(STATE_TICK_SECS)), if active => {
-                report_state(&ctx, &client, &http, &rooms, discord_id).await;
+                report_state(&ctx, &client, &http, &rooms, discord_id, voice_bitrate_kbps).await;
             }
         }
     }
@@ -166,37 +178,43 @@ async fn handle_command(
     discord_id: u64,
     active: &mut bool,
     command: &crate::songarr::RemoteCommand,
+    voice_bitrate_kbps: u32,
 ) {
     match command.action.as_str() {
         "connect" => {
             *active = true;
-            let _ = resolve(ctx, rooms, discord_id, true).await;
+            let _ = resolve(ctx, rooms, discord_id, true, voice_bitrate_kbps).await;
         }
         "disconnect" => {
             *active = false;
             // Don't leave the room — others may still be listening. Just stop
             // reporting/controlling from this app.
             let _ = client
-                .remote_report_state(
-                    &serde_json::json!({ "connected": false, "isPlaying": false }),
-                )
+                .remote_report_state(&serde_json::json!({ "connected": false, "isPlaying": false }))
                 .await;
         }
         "play" => {
-            if let Status::Controlling(guild) = resolve(ctx, rooms, discord_id, true).await {
+            if let Status::Controlling(guild) =
+                resolve(ctx, rooms, discord_id, true, voice_bitrate_kbps).await
+            {
                 let tracks = command
                     .payload
                     .get("tracks")
                     .and_then(|v| v.as_array())
                     .map(|items| items.iter().filter_map(TrackMeta::from_json).collect())
                     .unwrap_or_default();
-                let start = command.payload.get("startIndex").and_then(|v| v.as_u64())
+                let start = command
+                    .payload
+                    .get("startIndex")
+                    .and_then(|v| v.as_u64())
                     .unwrap_or(0) as usize;
                 play_into_room(ctx, http, client, rooms, guild, tracks, start, false).await;
             }
         }
         "wave" => {
-            if let Status::Controlling(guild) = resolve(ctx, rooms, discord_id, true).await {
+            if let Status::Controlling(guild) =
+                resolve(ctx, rooms, discord_id, true, voice_bitrate_kbps).await
+            {
                 let tracks: Vec<TrackMeta> = client
                     .wave_next(None, 12)
                     .await
@@ -208,7 +226,9 @@ async fn handle_command(
             }
         }
         "pause" | "resume" | "next" | "seek" | "prev" => {
-            if let Status::Controlling(guild) = resolve(ctx, rooms, discord_id, false).await {
+            if let Status::Controlling(guild) =
+                resolve(ctx, rooms, discord_id, false, voice_bitrate_kbps).await
+            {
                 control(ctx, http, client, rooms, guild, command).await;
             }
         }
@@ -217,13 +237,23 @@ async fn handle_command(
 }
 
 /// Where does this user stand relative to the bot? Optionally claim an idle bot.
-async fn resolve(ctx: &serenity::Context, rooms: &Rooms, discord_id: u64, claim: bool) -> Status {
+async fn resolve(
+    ctx: &serenity::Context,
+    rooms: &Rooms,
+    discord_id: u64,
+    claim: bool,
+    voice_bitrate_kbps: u32,
+) -> Status {
     let Some((guild, channel)) = user_voice(ctx, UserId::new(discord_id)) else {
         return Status::Idle;
     };
     if let Some(room) = room_arc(rooms, guild).await {
         let in_channel = room.lock().await.channel_id == channel;
-        return if in_channel { Status::Controlling(guild) } else { Status::Busy };
+        return if in_channel {
+            Status::Controlling(guild)
+        } else {
+            Status::Busy
+        };
     }
     if !claim {
         return Status::Idle;
@@ -234,12 +264,22 @@ async fn resolve(ctx: &serenity::Context, rooms: &Rooms, discord_id: u64, claim:
         if let Some(room) = map.get(&guild).cloned() {
             drop(map);
             let in_channel = room.lock().await.channel_id == channel;
-            return if in_channel { Status::Controlling(guild) } else { Status::Busy };
+            return if in_channel {
+                Status::Controlling(guild)
+            } else {
+                Status::Busy
+            };
         }
         map.insert(guild, Arc::new(Mutex::new(Room::new(channel))));
     }
     let joined = match songbird::get(ctx).await {
-        Some(manager) => manager.join(guild, channel).await.is_ok(),
+        Some(manager) => match manager.join(guild, channel).await {
+            Ok(call) => {
+                set_music_bitrate(&call, voice_bitrate_kbps).await;
+                true
+            }
+            Err(_) => false,
+        },
         None => false,
     };
     if joined {
@@ -322,7 +362,11 @@ async fn prev(
     let Some(handle) = call.lock().await.queue().current() else {
         return;
     };
-    let position = handle.get_info().await.map(|info| info.position).unwrap_or_default();
+    let position = handle
+        .get_info()
+        .await
+        .map(|info| info.position)
+        .unwrap_or_default();
     if position > Duration::from_secs(3) {
         let _ = handle.seek(Duration::ZERO);
         return;
@@ -332,7 +376,10 @@ async fn prev(
     };
     let (tracks, wave, target) = {
         let room = room.lock().await;
-        let current_id = room.metas.get(&handle.uuid().to_string()).map(|m| m.id.clone());
+        let current_id = room
+            .metas
+            .get(&handle.uuid().to_string())
+            .map(|m| m.id.clone());
         let target = current_id
             .as_ref()
             .and_then(|id| room.tracks.iter().position(|t| &t.id == id))
@@ -356,8 +403,9 @@ async fn report_state(
     http: &reqwest::Client,
     rooms: &Rooms,
     discord_id: u64,
+    voice_bitrate_kbps: u32,
 ) {
-    match resolve(ctx, rooms, discord_id, false).await {
+    match resolve(ctx, rooms, discord_id, false, voice_bitrate_kbps).await {
         Status::Busy => {
             let _ = client
                 .remote_report_state(
@@ -367,9 +415,7 @@ async fn report_state(
         }
         Status::Idle => {
             let _ = client
-                .remote_report_state(
-                    &serde_json::json!({ "connected": false, "isPlaying": false }),
-                )
+                .remote_report_state(&serde_json::json!({ "connected": false, "isPlaying": false }))
                 .await;
         }
         Status::Controlling(guild) => {
@@ -381,7 +427,11 @@ async fn report_state(
     }
 }
 
-async fn room_state_json(ctx: &serenity::Context, rooms: &Rooms, guild: GuildId) -> serde_json::Value {
+async fn room_state_json(
+    ctx: &serenity::Context,
+    rooms: &Rooms,
+    guild: GuildId,
+) -> serde_json::Value {
     let (Some(room), Some(call)) = (room_arc(rooms, guild).await, current_call(ctx, guild).await)
     else {
         return serde_json::json!({ "connected": false, "isPlaying": false });
@@ -440,7 +490,10 @@ async fn refill_if_low(
     if !wave || call.lock().await.queue().len() > WAVE_REFILL_THRESHOLD {
         return;
     }
-    let fresh = client.wave_next(seed.as_deref(), 12).await.unwrap_or_default();
+    let fresh = client
+        .wave_next(seed.as_deref(), 12)
+        .await
+        .unwrap_or_default();
     let mut room = room.lock().await;
     for track in fresh {
         let meta = TrackMeta::from_track(track);
@@ -460,7 +513,12 @@ async fn watchdog(ctx: serenity::Context, rooms: Rooms) {
     loop {
         tokio::time::sleep(Duration::from_secs(WATCHDOG_TICK_SECS)).await;
         let entries: Vec<(GuildId, Arc<Mutex<Room>>)> = {
-            rooms.lock().await.iter().map(|(g, r)| (*g, r.clone())).collect()
+            rooms
+                .lock()
+                .await
+                .iter()
+                .map(|(g, r)| (*g, r.clone()))
+                .collect()
         };
         for (guild, room) in entries {
             let channel = room.lock().await.channel_id;

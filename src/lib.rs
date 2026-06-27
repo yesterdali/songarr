@@ -53,6 +53,8 @@ pub struct AppState {
     /// so app↔bot control is push-like instead of polled.
     pub remote_waiters:
         Arc<tokio::sync::Mutex<std::collections::HashMap<String, Arc<RemoteWaiters>>>>,
+    /// In-memory Listen Together sessions (ephemeral, keyed by room code).
+    pub listen_sessions: proxy::wave::ListenSessions,
     envelope_cache: Arc<tokio::sync::OnceCell<Envelope>>,
 }
 
@@ -92,6 +94,7 @@ impl AppState {
                 std::collections::HashSet::new(),
             )),
             remote_waiters: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
+            listen_sessions: Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new())),
             envelope_cache: Arc::new(tokio::sync::OnceCell::new()),
         })
     }
@@ -196,6 +199,27 @@ pub fn build_app(state: AppState) -> Router {
                 .delete(proxy::wave::avatar_delete_handler),
         )
         .route("/wave/api/avatar", get(proxy::wave::avatar_get_handler))
+        .route("/wave/api/time", get(proxy::wave::listen_time_handler))
+        .route(
+            "/wave/api/listen/create",
+            axum::routing::post(proxy::wave::listen_create_handler),
+        )
+        .route(
+            "/wave/api/listen/join",
+            axum::routing::post(proxy::wave::listen_join_handler),
+        )
+        .route(
+            "/wave/api/listen/leave",
+            axum::routing::post(proxy::wave::listen_leave_handler),
+        )
+        .route(
+            "/wave/api/listen/state",
+            get(proxy::wave::listen_state_handler),
+        )
+        .route(
+            "/wave/api/listen/command",
+            axum::routing::post(proxy::wave::listen_command_handler),
+        )
         .route(
             "/wave/api/remote/command",
             axum::routing::post(proxy::wave::remote_command_handler),
@@ -206,8 +230,7 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/wave/api/remote/state",
-            get(proxy::wave::remote_state_handler)
-                .post(proxy::wave::remote_state_report_handler),
+            get(proxy::wave::remote_state_handler).post(proxy::wave::remote_state_report_handler),
         )
         .route("/wave/{*path}", get(proxy::wave::asset));
     let router = intercept!(router, "search2", proxy::search::search2_handler);

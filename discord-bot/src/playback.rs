@@ -2,8 +2,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use poise::serenity_prelude::GuildId;
+use songbird::driver::Bitrate;
 use songbird::input::HttpRequest;
-use songbird::{Call, Event, EventContext, EventHandler as VoiceEventHandler, Songbird, TrackEvent};
+use songbird::{
+    Call, Event, EventContext, EventHandler as VoiceEventHandler, Songbird, TrackEvent,
+};
 use tokio::sync::Mutex;
 
 use crate::songarr::{SongarrClient, Track};
@@ -34,7 +37,14 @@ pub async fn join_user_channel(
         .ok_or("Голосовой движок не инициализирован.")?
         .clone();
     let call = manager.join(guild_id, channel_id).await?;
+    set_music_bitrate(&call, ctx.data().config.voice_bitrate_kbps).await;
     Ok((manager, guild_id, call))
+}
+
+pub async fn set_music_bitrate(call: &Arc<Mutex<Call>>, bitrate_kbps: u32) {
+    call.lock()
+        .await
+        .set_bitrate(Bitrate::Bits((bitrate_kbps * 1000) as i32));
 }
 
 /// The active voice call for the invoking guild, if any.
@@ -117,6 +127,13 @@ pub async fn install_wave_refiller(
     let mut handler = call.lock().await;
     handler.add_global_event(
         Event::Track(TrackEvent::End),
-        WaveRefiller { manager, guild_id, http, stream_http, link, labels },
+        WaveRefiller {
+            manager,
+            guild_id,
+            http,
+            stream_http,
+            link,
+            labels,
+        },
     );
 }

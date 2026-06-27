@@ -69,6 +69,29 @@ export type Profile = {
   hasAvatar: boolean;
 };
 
+// Listen Together — a synced group-listening session.
+export type ListenMember = { username: string; displayName?: string };
+export type ListenEvent = {
+  id: number;
+  username: string;
+  kind: "chat" | "reaction" | string;
+  text: string;
+  atMs: number;
+};
+export type ListenState = {
+  code: string;
+  host: string;
+  isHost: boolean;
+  members: ListenMember[];
+  track: Song | null;
+  queue: Song[];
+  events: ListenEvent[];
+  anchorPosMs: number;
+  anchorTsMs: number;
+  isPlaying: boolean;
+  rev: number;
+};
+
 // The Discord bot's reported playback, for remote control.
 export type RemoteState = {
   connected: boolean;

@@ -369,8 +369,7 @@ async fn stream_source(
     // innertube is YouTube-specific; gate on the resolved URL host so the
     // common deezer→YouTube path keeps the fast path while a pinned non-YouTube
     // link (e.g. VK) goes straight to yt-dlp instead of a doomed attempt.
-    let is_youtube =
-        resolution.url.contains("youtube.com") || resolution.url.contains("youtu.be");
+    let is_youtube = resolution.url.contains("youtube.com") || resolution.url.contains("youtu.be");
 
     // Source of original-quality bytes: innertube direct HTTP when enabled
     // and working (~1s to audio), else the yt-dlp pipe (~1.5s with the

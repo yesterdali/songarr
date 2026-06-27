@@ -180,28 +180,32 @@ async fn yandex_virtual(state: &AppState, track_id: &str) -> anyhow::Result<Inge
     );
     // Best-effort metadata; if the helper can't fetch it, fall back to a
     // placeholder and let lofty re-tag from the downloaded file on import.
-    let (artist, title, album, duration_ms, isrc, artwork_url) =
-        match crate::yandex::track_meta(&state.config.yandex, track_id).await {
-            Ok(t) => (
-                t.artist,
-                t.title,
-                t.album,
-                t.duration_ms,
-                t.isrc,
-                t.artwork_url,
-            ),
-            Err(error) => {
-                tracing::warn!(%error, track_id, "Yandex metadata lookup failed; using placeholder");
-                (
-                    "Unknown artist".to_string(),
-                    format!("Yandex track {track_id}"),
-                    None,
-                    None,
-                    None,
-                    None,
-                )
-            }
-        };
+    let (artist, title, album, duration_ms, isrc, artwork_url) = match crate::yandex::track_meta(
+        &state.config.yandex,
+        track_id,
+    )
+    .await
+    {
+        Ok(t) => (
+            t.artist,
+            t.title,
+            t.album,
+            t.duration_ms,
+            t.isrc,
+            t.artwork_url,
+        ),
+        Err(error) => {
+            tracing::warn!(%error, track_id, "Yandex metadata lookup failed; using placeholder");
+            (
+                "Unknown artist".to_string(),
+                format!("Yandex track {track_id}"),
+                None,
+                None,
+                None,
+                None,
+            )
+        }
+    };
     let catalog = CatalogTrack {
         provider: crate::yandex::PROVIDER,
         provider_track_id: track_id.to_string(),
@@ -234,8 +238,13 @@ async fn vk_virtual(state: &AppState, track_id: &str) -> anyhow::Result<Ingested
     let meta = crate::vk::track_meta(&state.config.vk, track_id)
         .await
         .map_err(|error| anyhow!("couldn't read that VK track: {error}"))?;
-    let (artist, title, album, duration_ms, artwork_url) =
-        (meta.artist, meta.title, meta.album, meta.duration_ms, meta.artwork_url);
+    let (artist, title, album, duration_ms, artwork_url) = (
+        meta.artist,
+        meta.title,
+        meta.album,
+        meta.duration_ms,
+        meta.artwork_url,
+    );
     let catalog = CatalogTrack {
         provider: crate::vk::PROVIDER,
         provider_track_id: track_id.to_string(),

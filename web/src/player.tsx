@@ -14,10 +14,16 @@ import {
 } from "react";
 import {
   coverUrl,
+  createListen,
   getLyrics,
+  getListenState,
   getRemoteState,
+  getServerTime,
   getStarred,
   getWaveNext,
+  joinListen as apiJoinListen,
+  leaveListen as apiLeaveListen,
+  listenCommand,
   remoteCommand,
   reportNowPlaying,
   star,
@@ -27,7 +33,7 @@ import {
 } from "./api";
 import type { WaveSession } from "./auth";
 import { useDownloads } from "./downloads";
-import type { RemoteState, Song } from "./types";
+import type { ListenEvent, ListenMember, ListenState, RemoteState, Song } from "./types";
 
 /** A track reduced to the fields the bot needs in a remote `play` command. */
 function toRemoteTrack(song: Song) {
@@ -38,7 +44,15 @@ function toRemoteTrack(song: Song) {
     album: song.album ?? null,
     coverArt: song.coverArt ?? null,
     duration: song.duration ?? null,
+    durationMs: song.duration ? Math.round(song.duration * 1000) : null,
+    provider: song.provider ?? null,
+    artistId: song.artistId ?? null,
+    albumId: song.albumId ?? null,
   };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 export type RepeatMode = "off" | "all" | "one";
@@ -62,6 +76,15 @@ type PlayerValue = {
   remoteBusy: boolean;
   connectRemote: () => void;
   disconnectRemote: () => void;
+  /** Listen Together: the room code if in one, else null. */
+  listenCode: string | null;
+  listenMembers: ListenMember[];
+  listenEvents: ListenEvent[];
+  startListen: () => Promise<string>;
+  joinListen: (code: string) => Promise<void>;
+  leaveListen: () => void;
+  sendListenReaction: (emoji: string) => void;
+  sendListenChat: (text: string) => void;
   playQueue: (songs: Song[], startIndex?: number) => void;
   startWave: () => Promise<void>;
   toggle: () => void;
@@ -125,6 +148,14 @@ export function PlayerProvider({
   const remoteStateRef = useRef(remoteState);
   remoteStateRef.current = remoteState;
   const extendingRef = useRef(false);
+  // Listen Together (shared browser session).
+  const [listenCode, setListenCode] = useState<string | null>(null);
+  const [listenState, setListenState] = useState<ListenState | null>(null);
+  const [listenClockOffsetMs, setListenClockOffsetMs] = useState(0);
+  const listenCodeRef = useRef<string | null>(null);
+  const listenStateRef = useRef<ListenState | null>(null);
+  listenCodeRef.current = listenCode;
+  listenStateRef.current = listenState;
 
   const downloads = useDownloads();
   const getPlayableUrl = downloads.getPlayableUrl; // stable identity
@@ -154,6 +185,32 @@ export function PlayerProvider({
     },
     [session],
   );
+
+  const dispatchListen = useCallback(
+    (action: string, payload?: unknown) => {
+      const code = listenCodeRef.current;
+      if (!code) return;
+      listenCommand(session, code, action, payload).catch(() => undefined);
+    },
+    [session],
+  );
+
+  const estimateListenClockOffset = useCallback(async () => {
+    let bestOffset = 0;
+    let bestRtt = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < 4; i += 1) {
+      const started = Date.now();
+      const serverMs = await getServerTime(session);
+      const ended = Date.now();
+      const rtt = ended - started;
+      if (rtt < bestRtt) {
+        bestRtt = rtt;
+        bestOffset = serverMs + rtt / 2 - ended;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 30));
+    }
+    setListenClockOffsetMs(bestOffset);
+  }, [session]);
 
   /** Warm the browser cache with a song's covers: the full-screen size and
    *  the list/backdrop size. */
@@ -214,10 +271,15 @@ export function PlayerProvider({
       dispatchRemote("next");
       return;
     }
+    if (listenCodeRef.current) {
+      dispatchListen("next");
+      return;
+    }
     advance("skip");
-  }, [advance, dispatchRemote]);
+  }, [advance, dispatchListen, dispatchRemote]);
 
   const completeAndNext = useCallback(() => {
+    if (listenCodeRef.current) return;
     advance("play");
   }, [advance]);
 
@@ -226,13 +288,22 @@ export function PlayerProvider({
       dispatchRemote("prev");
       return;
     }
+    if (listenCodeRef.current) {
+      const audio = audioRef.current;
+      if (audio && audio.currentTime > 3) {
+        dispatchListen("seek", { positionMs: 0 });
+      } else {
+        dispatchListen("prev");
+      }
+      return;
+    }
     const audio = audioRef.current;
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       return;
     }
     setIndex((i) => (i > 0 ? i - 1 : i));
-  }, [dispatchRemote]);
+  }, [dispatchListen, dispatchRemote]);
 
   // `ended` must always advance from the latest queue state, while the
   // attached listeners stay stable across element swaps — bridge via a ref.
@@ -335,9 +406,13 @@ export function PlayerProvider({
         old.pause();
         old.removeAttribute("src");
       }
-      preloaded.play().catch(() => {
-        /* autoplay/gesture rejection — the UI play button recovers */
-      });
+      if (!listenCodeRef.current || listenStateRef.current?.isPlaying) {
+        preloaded.play().catch(() => {
+          /* autoplay/gesture rejection — the UI play button recovers */
+        });
+      } else {
+        preloaded.pause();
+      }
       return;
     }
     const audio = audioRef.current;
@@ -351,9 +426,11 @@ export function PlayerProvider({
       if (cancelled || audioRef.current !== audio) return;
       audio.src = localUrl ?? current.streamUrl ?? streamUrl(session, current.id);
       audio.load();
-      audio.play().catch(() => {
-        /* autoplay/gesture rejection — the UI play button recovers */
-      });
+      if (!listenCodeRef.current || listenStateRef.current?.isPlaying) {
+        audio.play().catch(() => {
+          /* autoplay/gesture rejection — the UI play button recovers */
+        });
+      }
     });
     return () => {
       cancelled = true;
@@ -406,7 +483,7 @@ export function PlayerProvider({
 
   // Endless Wave: ask the server for more when the queue is almost drained.
   useEffect(() => {
-    if (!isWave || !current || extendingRef.current || remoteOnRef.current) return;
+    if (!isWave || !current || extendingRef.current || remoteOnRef.current || listenCodeRef.current) return;
     if (queue.length - index > 3) return;
     extendingRef.current = true;
     getWaveNext(session, { seedId: current.id, count: 12 })
@@ -480,6 +557,101 @@ export function PlayerProvider({
     };
   }, [remoteOn, session]);
 
+  // Listen Together: long-poll shared room revisions and mirror the shared
+  // timeline into local playback state.
+  useEffect(() => {
+    if (!listenCode) return;
+    let active = true;
+    const controller = new AbortController();
+    let since = 0;
+    estimateListenClockOffset().catch(() => undefined);
+    (async () => {
+      while (active) {
+        try {
+          const state = await getListenState(session, {
+            code: listenCode,
+            since,
+            wait: 25,
+            signal: controller.signal,
+          });
+          if (!active) break;
+          if (!state) {
+            setListenCode(null);
+            setListenState(null);
+            break;
+          }
+          since = state.rev;
+          setListenState(state);
+        } catch {
+          if (!active) break;
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+    })();
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [estimateListenClockOffset, listenCode, session]);
+
+  useEffect(() => {
+    const state = listenState;
+    if (!listenCode || !state) return;
+    setIsWave(false);
+    if (!state.track) {
+      audioRef.current?.pause();
+      setQueue([]);
+      setIndex(0);
+      return;
+    }
+    const nextQueue = [state.track, ...state.queue];
+    setQueue((existing) => {
+      if (
+        existing.length === nextQueue.length &&
+        existing.every((song, i) => song.id === nextQueue[i]?.id)
+      ) {
+        return existing;
+      }
+      return nextQueue;
+    });
+    setIndex((i) => (i === 0 ? i : 0));
+  }, [listenCode, listenState]);
+
+  // Listen Together: keep the audio element close to the shared server-clock
+  // timeline. Big drift seeks; small drift gently nudges playbackRate.
+  useEffect(() => {
+    if (!listenCode || !listenState?.track) return;
+    const sync = () => {
+      const audio = audioRef.current;
+      const state = listenStateRef.current;
+      if (!audio || !state?.track) return;
+      const targetMs = state.isPlaying
+        ? state.anchorPosMs + (Date.now() + listenClockOffsetMs - state.anchorTsMs)
+        : state.anchorPosMs;
+      const targetSec = Math.max(0, targetMs / 1000);
+      const drift = targetSec - audio.currentTime;
+      if (Math.abs(drift) > 0.75) {
+        audio.currentTime = targetSec;
+        audio.playbackRate = 1;
+      } else if (state.isPlaying && Math.abs(drift) > 0.08) {
+        audio.playbackRate = clamp(1 + drift * 0.04, 0.97, 1.03);
+      } else {
+        audio.playbackRate = 1;
+      }
+      if (state.isPlaying) {
+        audio.play().catch(() => undefined);
+      } else {
+        audio.pause();
+      }
+    };
+    sync();
+    const id = window.setInterval(sync, 500);
+    return () => {
+      window.clearInterval(id);
+      if (audioRef.current) audioRef.current.playbackRate = 1;
+    };
+  }, [listenClockOffsetMs, listenCode, listenState?.rev, listenState?.track?.id]);
+
   // Remote: tick a few times a second so the progress bar interpolates between
   // the (slower) state polls.
   useEffect(() => {
@@ -549,20 +721,30 @@ export function PlayerProvider({
         dispatchRemote("play", { tracks: songs.map(toRemoteTrack), startIndex });
         return;
       }
+      if (listenCodeRef.current) {
+        dispatchListen("play", { tracks: songs.map(toRemoteTrack), startIndex });
+        return;
+      }
       setIsWave(false);
       setShuffle(false);
       preShuffleRef.current = null;
       setQueue(songs);
       setIndex(Math.min(Math.max(startIndex, 0), songs.length - 1));
     },
-    [dispatchRemote],
+    [dispatchListen, dispatchRemote],
   );
 
   const connectRemote = useCallback(() => {
+    const code = listenCodeRef.current;
+    if (code) {
+      apiLeaveListen(session, code).catch(() => undefined);
+      setListenCode(null);
+      setListenState(null);
+    }
     audioRef.current?.pause();
     setRemoteOn(true);
     dispatchRemote("connect");
-  }, [dispatchRemote]);
+  }, [dispatchRemote, session]);
 
   const disconnectRemote = useCallback(() => {
     dispatchRemote("disconnect");
@@ -570,10 +752,63 @@ export function PlayerProvider({
     setRemoteState(null);
   }, [dispatchRemote]);
 
+  const startListen = useCallback(async () => {
+    if (remoteOnRef.current) {
+      dispatchRemote("disconnect");
+      setRemoteOn(false);
+      setRemoteState(null);
+    }
+    const code = await createListen(session);
+    const state = await apiJoinListen(session, code);
+    setListenCode(code);
+    setListenState(state);
+    await estimateListenClockOffset().catch(() => undefined);
+    return code;
+  }, [dispatchRemote, estimateListenClockOffset, session]);
+
+  const joinListen = useCallback(
+    async (code: string) => {
+      const normalized = code.trim().toUpperCase();
+      if (!normalized) return;
+      if (remoteOnRef.current) {
+        dispatchRemote("disconnect");
+        setRemoteOn(false);
+        setRemoteState(null);
+      }
+      const state = await apiJoinListen(session, normalized);
+      setListenCode(normalized);
+      setListenState(state);
+      await estimateListenClockOffset().catch(() => undefined);
+    },
+    [dispatchRemote, estimateListenClockOffset, session],
+  );
+
+  const leaveListen = useCallback(() => {
+    const code = listenCodeRef.current;
+    if (code) apiLeaveListen(session, code).catch(() => undefined);
+    setListenCode(null);
+    setListenState(null);
+    if (audioRef.current) audioRef.current.playbackRate = 1;
+  }, [session]);
+
+  const sendListenReaction = useCallback(
+    (emoji: string) => dispatchListen("reaction", { emoji }),
+    [dispatchListen],
+  );
+
+  const sendListenChat = useCallback(
+    (text: string) => dispatchListen("chat", { text }),
+    [dispatchListen],
+  );
+
   const startWave = useCallback(async () => {
     // Remote: let the bot run its own endless Wave (refills server-side).
     if (remoteOnRef.current) {
       dispatchRemote("wave");
+      return;
+    }
+    if (listenCodeRef.current) {
+      await listenCommand(session, listenCodeRef.current, "wave");
       return;
     }
     // Use the batch prefetched at startup when available; fetch fresh after
@@ -601,11 +836,16 @@ export function PlayerProvider({
       setRemoteState((s) => (s ? { ...s, isPlaying: !playing, fetchedAt: Date.now() } : s));
       return;
     }
+    if (listenCodeRef.current) {
+      const playing = listenStateRef.current?.isPlaying ?? isPlaying;
+      dispatchListen(playing ? "pause" : "resume");
+      return;
+    }
     const audio = audioRef.current;
     if (!audio) return;
     if (audio.paused) audio.play().catch(() => undefined);
     else audio.pause();
-  }, [dispatchRemote]);
+  }, [dispatchListen, dispatchRemote, isPlaying]);
 
   const seek = useCallback(
     (seconds: number) => {
@@ -615,10 +855,14 @@ export function PlayerProvider({
         setRemoteState((s) => (s ? { ...s, positionMs, fetchedAt: Date.now() } : s));
         return;
       }
+      if (listenCodeRef.current) {
+        dispatchListen("seek", { positionMs: Math.round(Math.max(seconds, 0) * 1000) });
+        return;
+      }
       const audio = audioRef.current;
       if (audio) audio.currentTime = seconds;
     },
-    [dispatchRemote],
+    [dispatchListen, dispatchRemote],
   );
 
   const isStarred = useCallback((id: string) => starredIds.has(id), [starredIds]);
@@ -653,12 +897,17 @@ export function PlayerProvider({
       dispatchRemote("next");
       return;
     }
+    if (listenCodeRef.current) {
+      dispatchListen("reaction", { emoji: "👎" });
+      dispatchListen("next");
+      return;
+    }
     if (!current) return;
     if (isWave) {
       waveFeedback(session, current.id, "dislike").catch(() => undefined);
     }
     advance("skip");
-  }, [advance, current, isWave, session, dispatchRemote]);
+  }, [advance, current, dispatchListen, dispatchRemote, isWave, session]);
 
   // Exposed playback view: the bot's reported state while remote, else local.
   // Remote position is interpolated from the last poll so the bar moves live.
@@ -683,6 +932,8 @@ export function PlayerProvider({
   const exposedIndex = remoteOn ? 0 : index;
   const remoteConnected = remoteState?.connected ?? false;
   const remoteBusy = remoteOn && (remoteState?.busy ?? false);
+  const listenMembers = listenState?.members ?? [];
+  const listenEvents = listenState?.events ?? [];
 
   const value = useMemo<PlayerValue>(
     () => ({
@@ -701,6 +952,14 @@ export function PlayerProvider({
       remoteBusy,
       connectRemote,
       disconnectRemote,
+      listenCode,
+      listenMembers,
+      listenEvents,
+      startListen,
+      joinListen,
+      leaveListen,
+      sendListenReaction,
+      sendListenChat,
       playQueue,
       startWave,
       toggle,
@@ -730,6 +989,14 @@ export function PlayerProvider({
       remoteBusy,
       connectRemote,
       disconnectRemote,
+      listenCode,
+      listenMembers,
+      listenEvents,
+      startListen,
+      joinListen,
+      leaveListen,
+      sendListenReaction,
+      sendListenChat,
       playQueue,
       startWave,
       toggle,

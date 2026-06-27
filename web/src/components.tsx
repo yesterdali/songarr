@@ -878,6 +878,174 @@ export function DiscordConnectToggle() {
   );
 }
 
+/** Listen Together room controls: create/join/leave plus the tiny phase-C
+ *  surface for reactions and lightweight chat. */
+export function ListenTogetherPanel() {
+  const {
+    session,
+    listenCode,
+    listenMembers,
+    listenEvents,
+    startListen,
+    joinListen,
+    leaveListen,
+    sendListenReaction,
+    sendListenChat,
+  } = usePlayer();
+  const [joinCode, setJoinCode] = useState("");
+  const [chat, setChat] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const createRoom = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const code = await startListen();
+      setJoinCode(code);
+      navigator.clipboard?.writeText(code).catch(() => undefined);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось создать комнату");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const joinRoom = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await joinListen(joinCode);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Не удалось войти");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submitChat = () => {
+    const text = chat.trim();
+    if (!text) return;
+    sendListenChat(text);
+    setChat("");
+  };
+
+  if (!listenCode) {
+    return (
+      <div className="rounded-xl border border-white/10 bg-white/[0.03] p-3">
+        <div className="mb-2 flex items-center gap-2 text-sm font-bold text-neutral-200">
+          <QueueIcon className="h-5 w-5 text-wave-pink" />
+          <span>Слушать вместе</span>
+        </div>
+        <div className="flex gap-2">
+          <input
+            value={joinCode}
+            onChange={(event) => setJoinCode(event.target.value.toUpperCase())}
+            placeholder="Код"
+            className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm font-bold uppercase outline-none transition focus:border-wave-pink/60"
+          />
+          <button
+            type="button"
+            onClick={joinRoom}
+            disabled={busy || !joinCode.trim()}
+            className="rounded-lg border border-wave-pink/25 px-3 py-2 text-sm font-bold text-wave-pink transition active:scale-95 disabled:opacity-50"
+          >
+            Войти
+          </button>
+        </div>
+        <button
+          type="button"
+          onClick={createRoom}
+          disabled={busy}
+          className="mt-2 flex w-full items-center justify-center gap-2 rounded-lg bg-wave-pink px-3 py-2 text-sm font-bold text-white transition active:scale-[0.98] disabled:opacity-60"
+        >
+          {busy ? <Spinner className="h-4 w-4 border-white/30 border-t-white" /> : null}
+          <span>Создать комнату</span>
+        </button>
+        {error ? <p className="mt-2 text-xs font-semibold text-red-300">{error}</p> : null}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border border-wave-pink/20 bg-wave-pink/10 p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <QueueIcon className="h-5 w-5 shrink-0 text-wave-pink" />
+        <button
+          type="button"
+          onClick={() => navigator.clipboard?.writeText(listenCode).catch(() => undefined)}
+          className="min-w-0 flex-1 truncate text-left text-sm font-black uppercase tracking-[0.12em] text-wave-pink"
+        >
+          {listenCode}
+        </button>
+        <button
+          type="button"
+          onClick={leaveListen}
+          className="rounded-full border border-white/10 px-2 py-1 text-xs font-bold text-white/60 transition active:scale-95"
+        >
+          Выйти
+        </button>
+      </div>
+      <div className="mb-2 flex -space-x-2 overflow-hidden">
+        {listenMembers.slice(0, 6).map((member) => (
+          <Avatar
+            key={member.username}
+            username={member.username}
+            name={member.displayName}
+            className="h-7 w-7 border border-[#17050d]"
+            textClass="text-xs"
+          />
+        ))}
+      </div>
+      <div className="mb-2 flex gap-1">
+        {["🖤", "🔥", "✨", "😭"].map((emoji) => (
+          <button
+            key={emoji}
+            type="button"
+            onClick={() => sendListenReaction(emoji)}
+            className="grid h-8 w-8 place-items-center rounded-full bg-white/5 text-sm transition active:scale-90"
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+      <div className="flex gap-2">
+        <input
+          value={chat}
+          onChange={(event) => setChat(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") submitChat();
+          }}
+          maxLength={280}
+          placeholder="Сообщение"
+          className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm outline-none transition focus:border-wave-pink/60"
+        />
+        <button
+          type="button"
+          onClick={submitChat}
+          disabled={!chat.trim()}
+          className="rounded-lg bg-white/10 px-3 py-2 text-sm font-bold text-white/75 transition active:scale-95 disabled:opacity-40"
+        >
+          OK
+        </button>
+      </div>
+      {listenEvents.length > 0 && (
+        <div className="mt-2 max-h-24 space-y-1 overflow-auto pr-1 text-xs">
+          {listenEvents.slice(-4).map((event) => (
+            <div key={event.id} className="flex gap-1.5 text-white/55">
+              <span className="shrink-0 font-bold text-white/70">
+                {event.username === session.username ? "ты" : event.username}
+              </span>
+              <span className="min-w-0 flex-1 truncate">{event.text}</span>
+              <span className="shrink-0 text-white/30">{timeAgo(Math.floor(event.atMs / 1000))}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Right-side Friend Activity feed: what everyone else is listening to. Tap a
  *  row to play that track. (For now every account on the instance is a friend.) */
 export function FriendsPanel() {
