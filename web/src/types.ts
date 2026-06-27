@@ -57,9 +57,16 @@ export type LyricsResult = {
 // A friend's most-recent play (Spotify-style Friend Activity).
 export type FriendActivity = {
   username: string;
+  displayName?: string;
   song: Song;
   /** Unix epoch seconds of the play. */
   updatedAt: number;
+};
+
+// Personalization.
+export type Profile = {
+  displayName: string | null;
+  hasAvatar: boolean;
 };
 
 // The Discord bot's reported playback, for remote control.

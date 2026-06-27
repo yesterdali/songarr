@@ -15,13 +15,82 @@ import {
   QueueIcon,
   RepeatIcon,
   RepeatOneIcon,
+  SettingsIcon,
   ShuffleIcon,
 } from "./icons";
-import { getFriends, getLyrics } from "./api";
+import { avatarUrl, getFriends, getLyrics, getProfile } from "./api";
 import { useDownloads } from "./downloads";
 import { useNav } from "./nav";
 import { formatTime, usePlayer } from "./player";
-import type { FriendActivity, LyricsResult, Song } from "./types";
+import type { FriendActivity, LyricsResult, Profile, Song } from "./types";
+
+/** A user's avatar (image), falling back to their initial if none is set. */
+export function Avatar({
+  username,
+  name,
+  className = "h-9 w-9",
+  textClass = "text-sm",
+  bust,
+}: {
+  username: string;
+  name?: string;
+  className?: string;
+  textClass?: string;
+  bust?: number;
+}) {
+  const { session } = usePlayer();
+  const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [username, bust]);
+  const initial = (name || username).slice(0, 1).toUpperCase();
+  if (failed) {
+    return (
+      <span
+        className={`grid shrink-0 place-items-center rounded-full bg-gradient-to-br from-wave-orange to-wave-violet font-bold text-white ${className} ${textClass}`}
+      >
+        {initial}
+      </span>
+    );
+  }
+  const src = bust ? `${avatarUrl(session, username)}&v=${bust}` : avatarUrl(session, username);
+  return (
+    <img
+      src={src}
+      alt=""
+      onError={() => setFailed(true)}
+      className={`shrink-0 rounded-full object-cover ${className}`}
+    />
+  );
+}
+
+/** Sidebar account chip: avatar + display name, opens Settings. */
+export function AccountButton() {
+  const { session } = usePlayer();
+  const nav = useNav();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  useEffect(() => {
+    let active = true;
+    getProfile(session)
+      .then((p) => {
+        if (active) setProfile(p);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [session]);
+  const name = profile?.displayName || session.username;
+  return (
+    <button
+      type="button"
+      onClick={() => nav.push({ name: "settings" })}
+      className="flex w-full items-center gap-3 rounded-xl border border-white/10 bg-white/[0.04] p-3 text-left transition hover:bg-white/[0.06]"
+    >
+      <Avatar username={session.username} name={name} />
+      <span className="min-w-0 flex-1 truncate text-sm font-bold">{name}</span>
+      <SettingsIcon className="h-4 w-4 shrink-0 text-neutral-500" />
+    </button>
+  );
+}
 
 function Spinner({ className = "h-5 w-5" }: { className?: string }) {
   return (
@@ -856,13 +925,18 @@ export function FriendsPanel() {
                     rounded="rounded-lg"
                     className="h-11 w-11 ring-1 ring-white/10"
                   />
-                  <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full bg-gradient-to-br from-wave-orange to-wave-violet text-[10px] font-bold text-white ring-2 ring-[#0d070b]">
-                    {friend.username.slice(0, 1).toUpperCase()}
+                  <span className="absolute -bottom-1 -right-1 rounded-full ring-2 ring-[#0d070b]">
+                    <Avatar
+                      username={friend.username}
+                      name={friend.displayName}
+                      className="h-5 w-5"
+                      textClass="text-[10px]"
+                    />
                   </span>
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold text-[#f3ecdd]">
-                    {friend.username}
+                    {friend.displayName || friend.username}
                   </span>
                   <span className="block truncate text-xs text-neutral-400">
                     {friend.song.title} · {friend.song.artist}

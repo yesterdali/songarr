@@ -10,6 +10,7 @@ import type {
   FriendActivity,
   LyricsResult,
   Playlist,
+  Profile,
   RemoteState,
   Song,
 } from "./types";
@@ -492,6 +493,7 @@ export async function reportNowPlaying(session: WaveSession, song: Song): Promis
 
 type RawFriend = {
   username: string;
+  displayName?: string;
   id: string;
   title?: string;
   artist?: string;
@@ -509,9 +511,55 @@ export async function getFriends(session: WaveSession): Promise<FriendActivity[]
   const body = (await response.json()) as { friends?: RawFriend[] };
   return (body.friends ?? []).map((raw) => ({
     username: raw.username,
+    displayName: raw.displayName,
     song: toSong(raw),
     updatedAt: raw.updatedAt ?? 0,
   }));
+}
+
+// ---- Personalization ----
+
+/** Avatar image URL for a user (an <img> src; 404s if none → fall back to initial). */
+export function avatarUrl(session: WaveSession, username: string): string {
+  return apiUrl(
+    session,
+    `/wave/api/avatar?${authQuery(session)}&user=${encodeURIComponent(username)}`,
+  );
+}
+
+export async function getProfile(session: WaveSession): Promise<Profile> {
+  const response = await fetch(apiUrl(session, `/wave/api/profile?${authQuery(session)}`), {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const raw = (await response.json()) as { displayName?: string | null; hasAvatar?: boolean };
+  return { displayName: raw.displayName ?? null, hasAvatar: Boolean(raw.hasAvatar) };
+}
+
+export async function setDisplayName(session: WaveSession, displayName: string): Promise<void> {
+  const response = await fetch(apiUrl(session, `/wave/api/profile?${authQuery(session)}`), {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ displayName }),
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+export async function uploadAvatar(session: WaveSession, image: Blob): Promise<void> {
+  const response = await fetch(apiUrl(session, `/wave/api/profile/avatar?${authQuery(session)}`), {
+    method: "PUT",
+    headers: { "Content-Type": image.type || "image/jpeg" },
+    body: image,
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+}
+
+export async function removeAvatar(session: WaveSession): Promise<void> {
+  const response = await fetch(apiUrl(session, `/wave/api/profile/avatar?${authQuery(session)}`), {
+    method: "DELETE",
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
 }
 
 // ---- Remote control (drive the Discord bot) ----

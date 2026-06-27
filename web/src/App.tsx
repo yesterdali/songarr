@@ -9,6 +9,8 @@ import {
   type WaveSession,
 } from "./auth";
 import {
+  AccountButton,
+  Avatar,
   DiscordConnectToggle,
   FriendsPanel,
   NowPlayingBar,
@@ -30,6 +32,7 @@ import {
   PlaylistsView,
   PlaylistView,
   SearchView,
+  SettingsView,
 } from "./views";
 
 function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
@@ -123,7 +126,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
   );
 }
 
-function CurrentScreen({ route }: { route: Route }) {
+function CurrentScreen({ route, onLogout }: { route: Route; onLogout: () => void }) {
   switch (route.name) {
     case "home":
       return <HomeView />;
@@ -145,6 +148,8 @@ function CurrentScreen({ route }: { route: Route }) {
       return <AlbumView id={route.id} title={route.title} />;
     case "playlist":
       return <PlaylistView id={route.id} title={route.title} />;
+    case "settings":
+      return <SettingsView onLogout={onLogout} />;
   }
 }
 
@@ -155,15 +160,7 @@ const TABS: { tab: TabName; label: string; icon: typeof WaveIcon }[] = [
   { tab: "playlists", label: "Плейлисты", icon: PlaylistIcon },
 ];
 
-function DesktopSidebar({
-  activeTab,
-  session,
-  onLogout,
-}: {
-  activeTab: TabName;
-  session: WaveSession;
-  onLogout: () => void;
-}) {
+function DesktopSidebar({ activeTab }: { activeTab: TabName }) {
   const nav = useNav();
   return (
     <aside className="hidden min-h-dvh border-r border-wave-pink/10 px-5 py-6 lg:flex lg:flex-col">
@@ -184,23 +181,7 @@ function DesktopSidebar({
       </button>
 
       <div className="mb-6 space-y-3">
-        <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-          <div className="mb-3 flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-wave-orange to-wave-violet text-sm font-bold text-white">
-              {session.username.slice(0, 1).toUpperCase()}
-            </span>
-            <span className="min-w-0 flex-1 truncate text-sm font-bold">
-              {session.username}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={onLogout}
-            className="w-full rounded-lg border border-white/10 px-3 py-2 text-sm font-bold text-neutral-300 transition hover:bg-white/[0.04] hover:text-white"
-          >
-            Log out
-          </button>
-        </div>
+        <AccountButton />
         <DiscordConnectToggle />
       </div>
 
@@ -249,7 +230,7 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
       <NavProvider value={nav}>
         <div className="min-h-dvh">
           <div className="mx-auto grid min-h-dvh w-full max-w-[1500px] lg:grid-cols-[240px_minmax(0,1fr)] xl:grid-cols-[240px_minmax(0,1fr)_340px]">
-            <DesktopSidebar activeTab={activeTab} session={session} onLogout={onLogout} />
+            <DesktopSidebar activeTab={activeTab} />
 
             <main className="min-w-0 px-5 pb-44 pt-6 md:px-8 lg:pb-28 lg:pt-8 xl:px-10">
               <div className="mx-auto w-full max-w-md md:max-w-3xl lg:max-w-5xl">
@@ -260,19 +241,15 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
                     </h1>
                     <button
                       type="button"
-                      onClick={onLogout}
-                      className="flex items-center gap-2 rounded-full border border-black/5 bg-white/70 py-1.5 pl-1.5 pr-3.5 backdrop-blur transition active:scale-95 dark:border-white/10 dark:bg-white/5"
+                      onClick={() => nav.push({ name: "settings" })}
+                      aria-label="settings"
+                      className="rounded-full transition active:scale-95"
                     >
-                      <span className="grid h-7 w-7 place-items-center rounded-full bg-gradient-to-br from-wave-orange to-wave-violet text-xs font-bold text-white">
-                        {session.username.slice(0, 1).toUpperCase()}
-                      </span>
-                      <span className="text-sm font-semibold text-neutral-600 dark:text-neutral-300">
-                        {session.username}
-                      </span>
+                      <Avatar username={session.username} className="h-9 w-9" />
                     </button>
                   </header>
                 )}
-                <CurrentScreen route={route} />
+                <CurrentScreen route={route} onLogout={onLogout} />
               </div>
             </main>
 

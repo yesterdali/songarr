@@ -187,6 +187,16 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route("/wave/api/friends", get(proxy::wave::friends_handler))
         .route(
+            "/wave/api/profile",
+            get(proxy::wave::profile_get_handler).put(proxy::wave::profile_set_handler),
+        )
+        .route(
+            "/wave/api/profile/avatar",
+            axum::routing::put(proxy::wave::avatar_set_handler)
+                .delete(proxy::wave::avatar_delete_handler),
+        )
+        .route("/wave/api/avatar", get(proxy::wave::avatar_get_handler))
+        .route(
             "/wave/api/remote/command",
             axum::routing::post(proxy::wave::remote_command_handler),
         )

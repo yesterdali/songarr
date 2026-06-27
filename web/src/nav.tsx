@@ -10,7 +10,8 @@ export type Route =
   | { name: "artist"; id: string; title: string }
   | { name: "artistLookup"; title: string }
   | { name: "album"; id: string; title: string }
-  | { name: "playlist"; id: string; title: string };
+  | { name: "playlist"; id: string; title: string }
+  | { name: "settings" };
 
 export type TabName = "home" | "search" | "library" | "playlists";
 
