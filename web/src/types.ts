@@ -12,6 +12,20 @@ export type Song = {
   streamUrl?: string;
   starred?: boolean;
   provider?: string;
+  reason?: RecommendationReason;
+};
+
+export type RecommendationReason = {
+  kind:
+    | "because_liked"
+    | "because_played"
+    | "similar_to_current"
+    | "yandex_wave"
+    | "yandex_cache"
+    | "library_random";
+  source?: "library" | "yandex" | "ytm" | "deezer" | "lastfm" | string;
+  seedArtist?: string;
+  seedTitle?: string;
 };
 
 export type Album = {

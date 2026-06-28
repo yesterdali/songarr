@@ -96,6 +96,7 @@ type PlayerValue = {
   seek: (seconds: number) => void;
   cycleRepeat: () => void;
   toggleShuffle: () => void;
+  moreLikeCurrent: () => Promise<void>;
   setVolume: (value: number) => void;
   toggleMute: () => void;
   isStarred: (id: string) => boolean;
@@ -776,6 +777,21 @@ export function PlayerProvider({
     }
   }, []);
 
+  const moreLikeCurrent = useCallback(async () => {
+    const song = currentRef.current;
+    if (!song || remoteOnRef.current || listenCodeRef.current) return;
+    const songs = await getWaveNext(sessionRef.current, { seedId: song.id, count: 12 });
+    if (songs.length === 0) return;
+    setIsWave(true);
+    setShuffle(false);
+    preShuffleRef.current = null;
+    setQueue((queue) => {
+      const currentSong = queue[indexRef.current] ?? song;
+      return [currentSong, ...songs.filter((next) => next.id !== currentSong.id)];
+    });
+    setIndex(0);
+  }, []);
+
   const setVolume = useCallback((value: number) => {
     const next = clamp(value, 0, 1);
     setVolumeState(next);
@@ -1079,6 +1095,7 @@ export function PlayerProvider({
       seek,
       cycleRepeat,
       toggleShuffle,
+      moreLikeCurrent,
       setVolume,
       toggleMute,
       isStarred,
@@ -1120,6 +1137,7 @@ export function PlayerProvider({
       seek,
       cycleRepeat,
       toggleShuffle,
+      moreLikeCurrent,
       setVolume,
       toggleMute,
       isStarred,

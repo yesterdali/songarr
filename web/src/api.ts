@@ -111,6 +111,7 @@ type RawSong = {
   streamUrl?: string;
   starred?: string;
   provider?: string;
+  reason?: Song["reason"];
 };
 
 function toSong(raw: RawSong): Song {
@@ -129,6 +130,7 @@ function toSong(raw: RawSong): Song {
     // The player builds an absolute, mp3 URL from the id instead.
     starred: Boolean(raw.starred),
     provider: raw.provider,
+    reason: raw.reason,
   };
 }
 

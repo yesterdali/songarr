@@ -24,6 +24,7 @@ import { useDownloads } from "./downloads";
 import { useNav } from "./nav";
 import { formatTime, usePlayer } from "./player";
 import { getStreamQuality, qualityLabel } from "./quality";
+import { reasonLabel } from "./reasons";
 import type { FriendActivity, LyricsResult, Profile, Song } from "./types";
 
 /** A user's avatar (image), falling back to their initial if none is set. */
@@ -284,6 +285,7 @@ export function SongRow({
 }) {
   const { playQueue, current, isPlaying, isStarred, toggleStar } = usePlayer();
   const active = current?.id === song.id;
+  const reason = reasonLabel(song);
   return (
     <div className="-mx-2 flex items-center gap-3 rounded-xl px-2 py-2 transition-colors hover:bg-black/[0.04] active:bg-black/[0.06] dark:hover:bg-white/[0.04] dark:active:bg-white/[0.07]">
       <button
@@ -319,6 +321,11 @@ export function SongRow({
             ) : null}
             {song.artist}
           </span>
+          {reason && (
+            <span className="block truncate text-[11px] font-semibold text-wave-pink/75">
+              {reason}
+            </span>
+          )}
         </span>
       </button>
       <DownloadButton song={song} className="h-8 w-8 shrink-0" />
@@ -395,6 +402,51 @@ export function NowPlayingBar({ onOpen }: { onOpen: () => void }) {
   );
 }
 
+function QueueSongRow({
+  song,
+  offset,
+  onClick,
+}: {
+  song: Song;
+  offset: number;
+  onClick: () => void;
+}) {
+  const reason = reasonLabel(song);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors active:bg-white/10"
+    >
+      <span className="grid h-5 w-7 shrink-0 place-items-center text-xs font-bold text-white/40">
+        {offset + 1}
+      </span>
+      <Cover
+        coverArt={song.coverArt}
+        size={80}
+        rounded="rounded-lg"
+        className="h-11 w-11 shrink-0"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold">{song.title}</span>
+        <span className="block truncate text-xs text-white/50">
+          {song.provider === "yandex" ? (
+            <span className="mr-1 rounded-full bg-wave-pink/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-wave-pink">
+              Yandex
+            </span>
+          ) : null}
+          {song.artist}
+        </span>
+        {reason && (
+          <span className="block truncate text-[11px] font-semibold text-wave-pink/70">
+            {reason}
+          </span>
+        )}
+      </span>
+    </button>
+  );
+}
+
 function QueueScreen({ onClose }: { onClose: () => void }) {
   const { queue, index, playQueue } = usePlayer();
   const upNext = queue.slice(index + 1);
@@ -420,33 +472,12 @@ function QueueScreen({ onClose }: { onClose: () => void }) {
         ) : (
           <div className="scrollbar-none min-h-0 flex-1 overflow-y-auto pb-4">
             {upNext.map((song, offset) => (
-              <button
+              <QueueSongRow
                 key={`${song.id}-${offset}`}
-                type="button"
+                song={song}
+                offset={offset}
                 onClick={() => playQueue(queue, index + 1 + offset)}
-                className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 py-2 text-left transition-colors active:bg-white/10"
-              >
-                <span className="grid h-5 w-7 shrink-0 place-items-center text-xs font-bold text-white/40">
-                  {offset + 1}
-                </span>
-                <Cover
-                  coverArt={song.coverArt}
-                  size={80}
-                  rounded="rounded-lg"
-                  className="h-11 w-11 shrink-0"
-                />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold">{song.title}</span>
-                  <span className="block truncate text-xs text-white/50">
-                    {song.provider === "yandex" ? (
-                      <span className="mr-1 rounded-full bg-wave-pink/15 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-wave-pink">
-                        Yandex
-                      </span>
-                    ) : null}
-                    {song.artist}
-                  </span>
-                </span>
-              </button>
+              />
             ))}
           </div>
         )}
@@ -592,7 +623,9 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
     isStarred,
     toggleStar,
     dislikeCurrent,
+    moreLikeCurrent,
   } = usePlayer();
+  const [moreBusy, setMoreBusy] = useState(false);
   const [queueOpen, setQueueOpen] = useState(false);
   const [lyricsOpen, setLyricsOpen] = useState(false);
   const [lyrics, setLyrics] = useState<LyricsResult | null>(null);
@@ -629,6 +662,7 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
   const streamQuality = getStreamQuality();
   const qualityReadout =
     streamQuality === "lossless" && current.provider ? "Лучшее доступное" : qualityLabel(streamQuality);
+  const currentReason = reasonLabel(current);
   const openArtist = () => {
     onClose();
     if (current.artistId) {
@@ -718,6 +752,11 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
             <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">
               {qualityReadout}
             </p>
+            {currentReason && (
+              <p className="mt-1 truncate text-xs font-semibold text-wave-pink/75">
+                {currentReason}
+              </p>
+            )}
           </div>
           <DownloadButton song={current} className="h-7 w-7" size="h-7 w-7" />
           <button
@@ -809,7 +848,19 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        <div className="mt-5 flex justify-center">
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            disabled={moreBusy}
+            onClick={() => {
+              setMoreBusy(true);
+              moreLikeCurrent().finally(() => setMoreBusy(false)).catch(() => undefined);
+            }}
+            className="inline-flex h-11 items-center gap-2 rounded-full bg-white/10 px-4 text-sm font-bold text-white/75 ring-1 ring-white/10 backdrop-blur transition active:scale-95 active:text-white disabled:opacity-60"
+          >
+            <ShuffleIcon className="h-5 w-5" />
+            <span>{moreBusy ? "Ищу" : "Похожее"}</span>
+          </button>
           <button
             type="button"
             onClick={() => setLyricsOpen(true)}

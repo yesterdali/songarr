@@ -1442,12 +1442,42 @@ struct WaveTrack {
     title: String,
     artist: String,
     provider: Option<String>,
+    reason: Option<WaveReason>,
     artist_id: Option<String>,
     album: Option<String>,
     album_id: Option<String>,
     duration_secs: Option<i64>,
     cover_art: Option<String>,
     stream_url: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WaveReason {
+    kind: &'static str,
+    source: Option<&'static str>,
+    seed_artist: Option<String>,
+    seed_title: Option<String>,
+}
+
+impl WaveReason {
+    fn source(kind: &'static str, source: &'static str) -> Self {
+        Self {
+            kind,
+            source: Some(source),
+            seed_artist: None,
+            seed_title: None,
+        }
+    }
+
+    fn seed(kind: &'static str, source: Option<&'static str>, seed: &SeedTrack) -> Self {
+        Self {
+            kind,
+            source,
+            seed_artist: Some(seed.artist.clone()),
+            seed_title: Some(seed.title.clone()),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1514,6 +1544,7 @@ async fn next_tracks(
                 &mut tracks,
                 seed,
                 count,
+                "similar_to_current",
             )
             .await;
         }
@@ -1532,6 +1563,7 @@ async fn next_tracks(
                 &mut tracks,
                 seed,
                 remaining.min(6),
+                "because_liked",
             )
             .await;
         }
@@ -1550,6 +1582,7 @@ async fn next_tracks(
                 &mut tracks,
                 seed,
                 remaining.min(6),
+                "because_played",
             )
             .await;
         }
@@ -1658,10 +1691,12 @@ async fn extend_from_cached_provider(
             continue;
         }
         existing.push(track_key);
-        tracks.push(wave_track_from_entry(
+        let mut wave_track = wave_track_from_entry(
             SongEntry::from_virtual(&track, &state.config.streaming),
             auth_stream,
-        ));
+        );
+        wave_track.reason = Some(WaveReason::source("yandex_cache", "yandex"));
+        tracks.push(wave_track);
         if tracks.len() >= target_count {
             break;
         }
@@ -1701,6 +1736,8 @@ async fn extend_from_random(
                     continue;
                 }
                 existing.push(track_key);
+                let mut track = track;
+                track.reason = Some(WaveReason::source("library_random", "library"));
                 tracks.push(track);
                 if tracks.len() >= target_count {
                     break;
@@ -1781,6 +1818,7 @@ async fn extend_from_yandex_wave(
         existing.push(key);
         let mut track = wave_track_from_entry(entry, auth_stream);
         track.provider = Some(crate::yandex::PROVIDER.into());
+        track.reason = Some(WaveReason::source("yandex_wave", "yandex"));
         tracks.push(track);
         if tracks.len() >= target_len {
             break;
@@ -1797,7 +1835,9 @@ async fn extend_from_seed(
     tracks: &mut Vec<WaveTrack>,
     seed: SeedTrack,
     count: usize,
+    reason_kind: &'static str,
 ) {
+    let reason = WaveReason::seed(reason_kind, source_from_provider(&seed.provider), &seed);
     let request_count = count.saturating_mul(2).clamp(count, MAX_NEXT_COUNT);
     let entries = match tokio::time::timeout(
         std::time::Duration::from_secs(SEED_EXTENSION_TIMEOUT_SECS),
@@ -1831,7 +1871,9 @@ async fn extend_from_seed(
             entry.duration_secs,
         ));
         if !tracks.iter().any(|t| t.id == entry.id) {
-            tracks.push(wave_track_from_entry(entry, auth_stream));
+            let mut track = wave_track_from_entry(entry, auth_stream);
+            track.reason = Some(reason.clone());
+            tracks.push(track);
         }
         if tracks.len() >= count {
             break;
@@ -1862,6 +1904,17 @@ async fn listen_seed_to_seed_track(state: &AppState, seed: crate::recs::ListenSe
         provider_track_id: seed
             .subsonic_id
             .unwrap_or_else(|| format!("listen:{}", uuid::Uuid::new_v4())),
+    }
+}
+
+fn source_from_provider(provider: &str) -> Option<&'static str> {
+    match provider {
+        "yandex" => Some("yandex"),
+        "ytmusic" | "ytm" => Some("ytm"),
+        "deezer" => Some("deezer"),
+        "lastfm" => Some("lastfm"),
+        "listen" | "feedback" => Some("library"),
+        _ => None,
     }
 }
 
@@ -2035,6 +2088,7 @@ fn wave_track_from_entry(entry: SongEntry, auth_stream: &str) -> WaveTrack {
         title: entry.title,
         artist: entry.artist,
         provider: entry.provider,
+        reason: None,
         artist_id: None,
         album: entry.album,
         album_id: None,
@@ -2054,6 +2108,7 @@ fn wave_track_from_json(song: &serde_json::Value, auth_stream: &str) -> Option<W
             .unwrap_or("Unknown artist")
             .to_string(),
         provider: None,
+        reason: None,
         artist_id: song["artistId"].as_str().map(str::to_string),
         album: song["album"].as_str().map(str::to_string),
         album_id: song["albumId"].as_str().map(str::to_string),
