@@ -9,6 +9,7 @@ import type {
   Album,
   Artist,
   FriendActivity,
+  ImportJob,
   ListenState,
   LyricsResult,
   Playlist,
@@ -477,6 +478,19 @@ export async function waveFeedback(
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }
+}
+
+export async function getImports(session: WaveSession, limit = 50): Promise<ImportJob[]> {
+  const query = new URLSearchParams(authQuery(session));
+  query.set("limit", String(limit));
+  const response = await fetch(apiUrl(session, `/wave/api/imports?${query.toString()}`), {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+  const body = (await response.json()) as { jobs?: ImportJob[] };
+  return body.jobs ?? [];
 }
 
 // ---- Friend Activity ----

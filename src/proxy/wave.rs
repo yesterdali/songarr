@@ -195,6 +195,24 @@ pub async fn feedback_handler(
     }
 }
 
+pub async fn imports_handler(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Response {
+    let (_username, _, _) = match authenticated(&state, &params).await {
+        Ok(auth) => auth,
+        Err(response) => return response,
+    };
+    let limit = requested_import_limit(params.get("limit").map(String::as_str));
+    match recent_import_jobs(&state, limit).await {
+        Ok(jobs) => Json(ImportJobsResponse { jobs }).into_response(),
+        Err(error) => {
+            tracing::warn!(%error, "wave imports failed");
+            (StatusCode::INTERNAL_SERVER_ERROR, "imports failed").into_response()
+        }
+    }
+}
+
 /// Record the caller's current track (Friend Activity). Auth in the query
 /// string, the track in the JSON body.
 pub async fn now_playing_handler(
@@ -1487,6 +1505,30 @@ pub struct FeedbackRequest {
     action: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportJobsResponse {
+    jobs: Vec<ImportJob>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ImportJob {
+    id: String,
+    track_id: String,
+    title: String,
+    artist: String,
+    album: Option<String>,
+    provider: String,
+    status: String,
+    requested_by: String,
+    match_score: Option<i64>,
+    error: Option<String>,
+    real_subsonic_id: Option<String>,
+    created_at: String,
+    updated_at: String,
+}
+
 async fn authenticated(
     state: &AppState,
     params: &HashMap<String, String>,
@@ -1519,6 +1561,84 @@ async fn authenticated(
     } else {
         Err((StatusCode::UNAUTHORIZED, "auth failed").into_response())
     }
+}
+
+async fn recent_import_jobs(state: &AppState, limit: i64) -> sqlx::Result<Vec<ImportJob>> {
+    sqlx::query_as::<
+        _,
+        (
+            String,
+            String,
+            String,
+            String,
+            Option<String>,
+            String,
+            String,
+            String,
+            Option<i64>,
+            Option<String>,
+            Option<String>,
+            String,
+            String,
+        ),
+    >(
+        "SELECT
+            sj.id,
+            sj.virtual_track_id,
+            vt.title,
+            vt.artist,
+            vt.album,
+            vt.provider,
+            sj.status,
+            sj.requested_by,
+            sj.match_score,
+            sj.error,
+            vt.real_subsonic_id,
+            sj.created_at,
+            sj.updated_at
+         FROM stream_jobs sj
+         JOIN virtual_tracks vt ON vt.id = sj.virtual_track_id
+         ORDER BY sj.updated_at DESC
+         LIMIT ?",
+    )
+    .bind(limit)
+    .fetch_all(&state.db)
+    .await
+    .map(|rows| {
+        rows.into_iter()
+            .map(
+                |(
+                    id,
+                    track_id,
+                    title,
+                    artist,
+                    album,
+                    provider,
+                    status,
+                    requested_by,
+                    match_score,
+                    error,
+                    real_subsonic_id,
+                    created_at,
+                    updated_at,
+                )| ImportJob {
+                    id,
+                    track_id,
+                    title,
+                    artist,
+                    album,
+                    provider,
+                    status,
+                    requested_by,
+                    match_score,
+                    error,
+                    real_subsonic_id,
+                    created_at,
+                    updated_at,
+                },
+            )
+            .collect()
+    })
 }
 
 async fn next_tracks(
@@ -2186,6 +2306,12 @@ fn requested_count(raw: Option<&str>) -> usize {
         .clamp(1, MAX_NEXT_COUNT)
 }
 
+fn requested_import_limit(raw: Option<&str>) -> i64 {
+    raw.and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(50)
+        .clamp(1, 200)
+}
+
 fn percent_encode(value: &str) -> String {
     url::form_urlencoded::byte_serialize(value.as_bytes()).collect()
 }
@@ -2233,6 +2359,13 @@ mod tests {
         assert_eq!(requested_count(None), DEFAULT_NEXT_COUNT);
         assert_eq!(requested_count(Some("0")), 1);
         assert_eq!(requested_count(Some("999")), MAX_NEXT_COUNT);
+    }
+
+    #[test]
+    fn requested_import_limit_is_bounded() {
+        assert_eq!(requested_import_limit(None), 50);
+        assert_eq!(requested_import_limit(Some("0")), 1);
+        assert_eq!(requested_import_limit(Some("5000")), 200);
     }
 
     #[test]

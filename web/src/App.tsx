@@ -20,7 +20,7 @@ import {
   NowPlayingScreen,
   PlayBar,
 } from "./components";
-import { LibraryIcon, PlaylistIcon, SearchIcon, WaveIcon } from "./icons";
+import { DownloadIcon, LibraryIcon, PlaylistIcon, SearchIcon, WaveIcon } from "./icons";
 import { DownloadsProvider } from "./downloads";
 import { NavProvider, useNav, type Route, type TabName } from "./nav";
 import { PlayerProvider } from "./player";
@@ -38,6 +38,7 @@ import {
   ArtistLookupView,
   ArtistView,
   HomeView,
+  ImportsView,
   LibraryView,
   LikedView,
   PlaylistsView,
@@ -362,6 +363,8 @@ function CurrentScreen({ route, onLogout }: { route: Route; onLogout: () => void
       return <PlaylistsView />;
     case "liked":
       return <LikedView />;
+    case "imports":
+      return <ImportsView />;
     case "artist":
       return <ArtistView id={route.id} title={route.title} />;
     case "artistLookup":
@@ -428,6 +431,14 @@ function DesktopSidebar({ activeTab }: { activeTab: TabName }) {
           );
         })}
       </nav>
+      <button
+        type="button"
+        onClick={() => nav.push({ name: "imports" })}
+        className="mt-6 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-neutral-500 transition hover:bg-white/[0.04] hover:text-neutral-200"
+      >
+        <DownloadIcon className="h-5 w-5" />
+        Импорт
+      </button>
 
     </aside>
   );

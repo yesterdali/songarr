@@ -56,6 +56,22 @@ export type Playlist = {
   comment?: string;
 };
 
+export type ImportJob = {
+  id: string;
+  trackId: string;
+  title: string;
+  artist: string;
+  album?: string;
+  provider: string;
+  status: "resolving" | "piping" | "finalizing" | "imported" | "needs_review" | "failed" | string;
+  requestedBy: string;
+  matchScore?: number;
+  error?: string;
+  realSubsonicId?: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type LyricsLine = {
   start?: number; // milliseconds
   value: string;

@@ -184,6 +184,7 @@ pub fn build_app(state: AppState) -> Router {
             "/wave/api/ingest",
             axum::routing::post(proxy::wave::ingest_handler),
         )
+        .route("/wave/api/imports", get(proxy::wave::imports_handler))
         .route(
             "/wave/api/now-playing",
             axum::routing::post(proxy::wave::now_playing_handler),
