@@ -11,11 +11,14 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
-  /* Blood & wine replace the old sunset gradient; every component built on
-     these tokens reskins automatically. */
-  --color-wave-orange: #a4243b;
+  /* Blood & wine. The three stops are spread across hue AND lightness so the
+     gradients (from-wave-orange via-wave-pink to-wave-violet) actually read as
+     gradients with depth, not a flat red smear — bright ember → crimson →
+     deep plum. wave-pink stays the standalone accent (links, active states),
+     so it keeps its tuned crimson; orange/violet are gradient ends only. */
+  --color-wave-orange: #e8452a;
   --color-wave-pink: #c41e3a;
-  --color-wave-violet: #45122e;
+  --color-wave-violet: #34093a;
 
   --font-display: "Cormorant", Georgia, "Times New Roman", serif;
 

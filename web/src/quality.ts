@@ -1,3 +1,5 @@
+import type { MessageKey } from "./i18n";
+
 // Per-device streaming quality. Maps to the Subsonic `format` + `maxBitRate`
 // the stream URL carries: Navidrome transcodes real tracks, and the proxy
 // honors them for virtual (YouTube/Yandex/VK) tracks too.
@@ -7,6 +9,22 @@ export type StreamQuality = "auto" | DownloadQuality;
 
 const STREAM_KEY = "songarr.streamQuality";
 const DOWNLOAD_KEY = "songarr.downloadQuality";
+
+/** Canonical tier → i18n-label lists, shared by onboarding and settings. */
+export const STREAM_QUALITY_CHOICES: [StreamQuality, MessageKey][] = [
+  ["auto", "qualityAuto"],
+  ["low", "qualityLow"],
+  ["normal", "qualityNormal"],
+  ["high", "qualityHigh"],
+  ["lossless", "qualityOriginal"],
+];
+
+export const DOWNLOAD_QUALITY_CHOICES: [DownloadQuality, MessageKey][] = [
+  ["low", "qualityLow"],
+  ["normal", "qualityNormal"],
+  ["high", "qualityHigh"],
+  ["lossless", "qualityOriginal"],
+];
 
 function isStreamQuality(value: string | null): value is StreamQuality {
   return (
@@ -85,10 +103,21 @@ export function isLosslessParams(params: QualityParams): boolean {
   return params.format === "raw" || params.maxBitRate === 0;
 }
 
-export function qualityLabel(quality: StreamQuality | DownloadQuality): string {
+type Translator = (key: MessageKey, vars?: Record<string, string | number>) => string;
+
+function defaultTranslate(key: MessageKey, vars: Record<string, string | number> = {}): string {
+  if (key === "qualityOriginal") return "Original";
+  if (key === "qualityMp3Kbps") return `MP3 ${vars.bitrate} kbps`;
+  return key;
+}
+
+export function qualityLabel(
+  quality: StreamQuality | DownloadQuality,
+  t: Translator = defaultTranslate,
+): string {
   const params = qualityParams(quality);
-  if (isLosslessParams(params)) return "Оригинал";
-  return `MP3 ${params.maxBitRate} кбит/с`;
+  if (isLosslessParams(params)) return t("qualityOriginal");
+  return t("qualityMp3Kbps", { bitrate: params.maxBitRate });
 }
 
 /** Resolve "auto" from the Network Information API (cellular / Data Saver → lower). */

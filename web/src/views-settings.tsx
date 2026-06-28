@@ -1,14 +1,17 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import * as api from "./api";
-import { Avatar } from "./components";
+import { Avatar, Segmented } from "./components";
 import {
+  DOWNLOAD_QUALITY_CHOICES,
   getDownloadQuality,
   getStreamQuality,
   setDownloadQuality,
   setStreamQuality,
+  STREAM_QUALITY_CHOICES,
   type DownloadQuality,
   type StreamQuality,
 } from "./quality";
+import { LANGUAGES, useI18n } from "./i18n";
 import { usePlayer } from "./player";
 import { ScreenHeader, SectionTitle } from "./views";
 
@@ -43,6 +46,7 @@ function resizeImage(file: File, size: number): Promise<Blob> {
 
 export function SettingsView({ onLogout }: { onLogout: () => void }) {
   const { session } = usePlayer();
+  const { language, setLanguage, t } = useI18n();
   const [name, setName] = useState("");
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -67,7 +71,7 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
       setSaved(true);
       setTimeout(() => setSaved(false), 1500);
     } catch {
-      setError("Не удалось сохранить");
+      setError(t("saveFailed"));
     } finally {
       setBusy(false);
     }
@@ -84,7 +88,7 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
       await api.uploadAvatar(session, blob);
       setAvatarVer((v) => v + 1);
     } catch {
-      setError("Не удалось загрузить аватар");
+      setError(t("avatarFailed"));
     } finally {
       setBusy(false);
     }
@@ -104,9 +108,9 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
 
   return (
     <div className="animate-fade-in max-w-md">
-      <ScreenHeader title="Настройки" />
+      <ScreenHeader title={t("settings")} />
       <section className="mb-8">
-        <SectionTitle>Профиль</SectionTitle>
+        <SectionTitle>{t("profile")}</SectionTitle>
         <div className="mb-5 flex items-center gap-4">
           <Avatar
             username={session.username}
@@ -117,7 +121,7 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
           />
           <div className="space-y-2">
             <label className="inline-block cursor-pointer rounded-full bg-wave-pink px-4 py-2 text-sm font-bold text-white transition active:scale-95">
-              Загрузить аватар
+              {t("uploadAvatar")}
               <input type="file" accept="image/*" className="hidden" onChange={onFile} />
             </label>
             <button
@@ -125,12 +129,12 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
               onClick={clearAvatar}
               className="block text-xs font-semibold text-neutral-500 transition hover:text-neutral-300"
             >
-              Удалить аватар
+              {t("removeAvatar")}
             </button>
           </div>
         </div>
         <label className="block">
-          <span className="mb-1.5 block text-sm font-semibold">Отображаемое имя</span>
+          <span className="mb-1.5 block text-sm font-semibold">{t("displayName")}</span>
           <input
             value={name}
             maxLength={40}
@@ -144,94 +148,66 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
           type="button"
           onClick={save}
           disabled={busy}
-          className="mt-3 rounded-full bg-gradient-to-r from-wave-orange to-wave-pink px-5 py-2.5 font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-95 disabled:opacity-60"
+          className="mt-3 rounded-full bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-2.5 font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-95 disabled:opacity-60"
         >
-          {saved ? "Сохранено ✓" : "Сохранить"}
+          {saved ? t("saved") : t("save")}
         </button>
       </section>
       <section className="mb-8">
-        <SectionTitle>Качество звука</SectionTitle>
+        <SectionTitle>{t("language")}</SectionTitle>
+        <Segmented
+          value={language}
+          onChange={setLanguage}
+          className="grid grid-cols-3 gap-2"
+          options={LANGUAGES.map((option) => ({ value: option.code, label: option.name }))}
+        />
+      </section>
+      <section className="mb-8">
+        <SectionTitle>{t("audioQuality")}</SectionTitle>
         <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
-          Стрим
+          {t("stream")}
         </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          {(
-            [
-              ["auto", "Авто"],
-              ["low", "Низкое · 96"],
-              ["normal", "Среднее · 192"],
-              ["high", "Высокое · 320"],
-              ["lossless", "Оригинал"],
-            ] as [StreamQuality, string][]
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => {
-                setStreamQualityState(value);
-                setStreamQuality(value);
-              }}
-              className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition active:scale-95 ${
-                streamQuality === value
-                  ? "border-wave-pink/40 bg-wave-pink/10 text-wave-pink"
-                  : "border-black/10 text-neutral-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={streamQuality}
+          onChange={(value) => {
+            setStreamQualityState(value);
+            setStreamQuality(value);
+          }}
+          className="grid grid-cols-2 gap-2 sm:grid-cols-5"
+          options={STREAM_QUALITY_CHOICES.map(([value, key]) => ({ value, label: t(key) }))}
+        />
         <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-          Применяется к этому устройству. «Авто» подстраивается под сеть, «Оригинал» при ошибке
-          декодирования откатится на MP3 320.
+          {t("streamHint")}
         </p>
         <p className="mb-2 mt-5 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
-          Загрузки
+          {t("downloads")}
         </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          {(
-            [
-              ["low", "Низкое · 96"],
-              ["normal", "Среднее · 192"],
-              ["high", "Высокое · 320"],
-              ["lossless", "Оригинал"],
-            ] as [DownloadQuality, string][]
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => {
-                setDownloadQualityState(value);
-                setDownloadQuality(value);
-              }}
-              className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition active:scale-95 ${
-                downloadQuality === value
-                  ? "border-wave-pink/40 bg-wave-pink/10 text-wave-pink"
-                  : "border-black/10 text-neutral-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <Segmented
+          value={downloadQuality}
+          onChange={(value) => {
+            setDownloadQualityState(value);
+            setDownloadQuality(value);
+          }}
+          className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+          options={DOWNLOAD_QUALITY_CHOICES.map(([value, key]) => ({ value, label: t(key) }))}
+        />
         <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-          Применяется только к новым скачиваниям. Уже сохраненные треки не меняются.
+          {t("downloadHint")}
         </p>
       </section>
       <section>
-        <SectionTitle>Аккаунт</SectionTitle>
+        <SectionTitle>{t("account")}</SectionTitle>
         <p className="mb-3 text-sm text-neutral-500 dark:text-neutral-400">
-          Вход: <span className="font-semibold">{session.username}</span>
+          {t("signedIn")}: <span className="font-semibold">{session.username}</span>
         </p>
         <button
           type="button"
           onClick={onLogout}
           className="rounded-lg border border-black/10 px-4 py-2 text-sm font-bold text-neutral-600 transition hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
         >
-          Выйти
+          {t("logout")}
         </button>
       </section>
     </div>
   );
 }
-

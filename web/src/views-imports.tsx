@@ -1,27 +1,28 @@
 import * as api from "./api";
+import { useI18n, type MessageKey } from "./i18n";
 import { usePlayer } from "./player";
 import type { ImportJob } from "./types";
 import { ScreenHeader, SectionTitle, Status, useAsync } from "./views";
 
 const ACTIVE_IMPORT_STATUSES = new Set(["resolving", "piping", "finalizing", "importing"]);
 
-function importStatusLabel(status: string): string {
+function importStatusLabel(status: string): MessageKey | null {
   switch (status) {
     case "resolving":
-      return "Ищем источник";
+      return "importResolving";
     case "piping":
-      return "Качаем";
+      return "importPiping";
     case "finalizing":
     case "importing":
-      return "Импортируем";
+      return "importFinalizing";
     case "imported":
-      return "Готово";
+      return "importReady";
     case "needs_review":
-      return "Нужно проверить";
+      return "importNeedsReview";
     case "failed":
-      return "Ошибка";
+      return "importError";
     default:
-      return status;
+      return null;
   }
 }
 
@@ -38,10 +39,10 @@ function importSection(jobs: ImportJob[], kind: "active" | "review" | "failed" |
   }
 }
 
-function shortDate(value: string): string {
+function shortDate(value: string, locale: string): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("ru", {
+  return new Intl.DateTimeFormat(locale, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -50,6 +51,7 @@ function shortDate(value: string): string {
 }
 
 function ImportJobRow({ job }: { job: ImportJob }) {
+  const { locale, t } = useI18n();
   const { playQueue } = usePlayer();
   const playable = job.status === "imported" && Boolean(job.realSubsonicId);
   const content = (
@@ -71,11 +73,11 @@ function ImportJobRow({ job }: { job: ImportJob }) {
           {job.provider}
         </span>
         <span className="text-[11px] font-semibold text-neutral-500 dark:text-neutral-400">
-          {importStatusLabel(job.status)}
+          {importStatusLabel(job.status) ? t(importStatusLabel(job.status)!) : job.status}
         </span>
         <span className="text-[11px] text-neutral-400">
           {job.matchScore !== undefined ? `${job.matchScore}% · ` : ""}
-          {shortDate(job.updatedAt)}
+          {shortDate(job.updatedAt, locale)}
         </span>
       </span>
     </>
@@ -134,6 +136,7 @@ function ImportStatusSection({
 }
 
 export function ImportsView() {
+  const { t } = useI18n();
   const { session } = usePlayer();
   const data = useAsync(() => api.getImports(session), [session]);
   const jobs = data.data ?? [];
@@ -151,21 +154,20 @@ export function ImportsView() {
 
   return (
     <div className="animate-fade-in">
-      <ScreenHeader title="Импорт" />
+      <ScreenHeader title={t("imports")} />
       <Status loading={data.loading} error={data.error} />
       {empty && (
         <div className="rounded-xl border border-wave-pink/15 bg-wave-pink/5 px-5 py-8 text-center">
-          <p className="font-bold">Пока нет импортов.</p>
+          <p className="font-bold">{t("importsEmptyTitle")}</p>
           <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-            Они появятся здесь после проигрывания внешних треков.
+            {t("importsEmptyHint")}
           </p>
         </div>
       )}
-      <ImportStatusSection title="Активные" jobs={active} />
-      <ImportStatusSection title="Нужно проверить" jobs={review} />
-      <ImportStatusSection title="Ошибки" jobs={failed} />
-      <ImportStatusSection title="Готово" jobs={imported} />
+      <ImportStatusSection title={t("importsActive")} jobs={active} />
+      <ImportStatusSection title={t("importsReview")} jobs={review} />
+      <ImportStatusSection title={t("importsFailed")} jobs={failed} />
+      <ImportStatusSection title={t("importsDone")} jobs={imported} />
     </div>
   );
 }
-

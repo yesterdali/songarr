@@ -27,6 +27,7 @@ import {
 } from "./player-utils";
 import { useStarredTracks } from "./player-stars";
 import { useDownloads } from "./downloads";
+import { useOnlineStatus } from "./online";
 import { getStreamQuality } from "./quality";
 import type { ListenState, RemoteState, Song } from "./types";
 
@@ -85,6 +86,7 @@ export function PlayerProvider({
   listenStateRef.current = listenState;
 
   const downloads = useDownloads();
+  const online = useOnlineStatus();
   const { isStarred, toggleStar } = useStarredTracks(session);
   const getPlayableUrl = downloads.getPlayableUrl; // stable identity
   // Latest values for callbacks/listeners that must stay stable across renders.
@@ -809,6 +811,19 @@ export function PlayerProvider({
       await listenCommand(session, listenCodeRef.current, "wave");
       return;
     }
+    if (!online) {
+      const downloaded = downloads.downloadedSongs;
+      if (downloaded.length === 0) {
+        throw new Error("offline-no-downloads");
+      }
+      const songs = [...downloaded].sort(() => Math.random() - 0.5);
+      setIsWave(false);
+      setShuffle(false);
+      preShuffleRef.current = null;
+      setQueue(songs);
+      setIndex(0);
+      return;
+    }
     // Use the batch prefetched at startup when available; fetch fresh after
     // it's consumed so repeated taps still get current recommendations.
     const prefetched = wavePrefetchRef.current;
@@ -825,7 +840,7 @@ export function PlayerProvider({
     preShuffleRef.current = null;
     setQueue(songs);
     setIndex(0);
-  }, [session, dispatchRemote]);
+  }, [session, dispatchRemote, downloads.downloadedSongs, online]);
 
   const toggle = useCallback(() => {
     if (remoteOnRef.current) {

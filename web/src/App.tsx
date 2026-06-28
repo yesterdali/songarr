@@ -16,18 +16,22 @@ import {
   DiscordConnectToggle,
   FriendsPanel,
   ListenTogetherPanel,
+  Segmented,
 } from "./components";
 import { NowPlayingBar, NowPlayingScreen } from "./now-playing";
 import { PlayBar } from "./playbar";
 import { DownloadIcon, LibraryIcon, PlaylistIcon, SearchIcon, WaveIcon } from "./icons";
+import { I18nProvider, type MessageKey, useI18n } from "./i18n";
 import { DownloadsProvider } from "./downloads";
 import { NavProvider, useNav, type Route, type TabName } from "./nav";
 import { PlayerProvider } from "./player";
 import {
+  DOWNLOAD_QUALITY_CHOICES,
   getDownloadQuality,
   getStreamQuality,
   setDownloadQuality,
   setStreamQuality,
+  STREAM_QUALITY_CHOICES,
   type DownloadQuality,
   type StreamQuality,
 } from "./quality";
@@ -45,21 +49,7 @@ import {
 } from "./views";
 import { ImportsView } from "./views-imports";
 import { SettingsView } from "./views-settings";
-
-const STREAM_QUALITY_CHOICES: [StreamQuality, string][] = [
-  ["auto", "Авто"],
-  ["low", "96"],
-  ["normal", "192"],
-  ["high", "320"],
-  ["lossless", "Оригинал"],
-];
-
-const DOWNLOAD_QUALITY_CHOICES: [DownloadQuality, string][] = [
-  ["low", "96"],
-  ["normal", "192"],
-  ["high", "320"],
-  ["lossless", "Оригинал"],
-];
+import { DownloadsView } from "./views-downloads";
 
 function SetupStep({
   index,
@@ -92,30 +82,22 @@ function QualityButtons<T extends string>({
   onChange,
 }: {
   value: T;
-  choices: [T, string][];
+  choices: [T, MessageKey][];
   onChange: (value: T) => void;
 }) {
+  const { t } = useI18n();
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-      {choices.map(([choice, label]) => (
-        <button
-          key={choice}
-          type="button"
-          onClick={() => onChange(choice)}
-          className={`rounded-xl border px-3 py-2 text-sm font-bold transition active:scale-95 ${
-            value === choice
-              ? "border-wave-pink/40 bg-wave-pink/10 text-wave-pink"
-              : "border-black/10 text-neutral-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
-          }`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <Segmented
+      value={value}
+      onChange={onChange}
+      className="grid grid-cols-2 gap-2 sm:grid-cols-5"
+      options={choices.map(([choice, labelKey]) => ({ value: choice, label: t(labelKey) }))}
+    />
   );
 }
 
 function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
+  const { t } = useI18n();
   const [serverUrl, setServerUrl] = useState(() => loadLastServerUrl());
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -135,7 +117,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
     try {
       new URL(normalized);
     } catch {
-      setError("Проверь адрес Songarr");
+      setError(t("songarrUrlError"));
       return;
     }
     setServerUrl(normalized);
@@ -154,7 +136,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
       setPassword("");
       setStep(3);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Не удалось войти");
+      setError(err instanceof Error ? err.message : t("loginFailed"));
     } finally {
       setBusy(false);
     }
@@ -169,13 +151,13 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
       const songs = await getWaveNext(session, { count: 1 });
       if (songs.length === 0) {
         setWaveStatus("warn");
-        setError("Волна пока не вернула треки. Войти можно, но рекомендации могут появиться позже.");
+        setError(t("waveCheckWarn"));
       } else {
         setWaveStatus("ok");
       }
     } catch (err) {
       setWaveStatus("warn");
-      setError(err instanceof Error ? err.message : "Не удалось проверить волну");
+      setError(err instanceof Error ? err.message : t("waveCheckWarn"));
     } finally {
       setBusy(false);
     }
@@ -197,15 +179,15 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
           <div className="mb-4 grid h-16 w-16 place-items-center rounded-lg bg-gradient-to-br from-wave-orange via-wave-pink to-wave-violet shadow-lg shadow-wave-pink/30">
             <WaveIcon className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-4xl font-extrabold tracking-tight">Твоя волна</h1>
+          <h1 className="text-4xl font-extrabold tracking-tight">{t("waveTitle")}</h1>
           <p className="font-display mt-1 text-base italic tracking-[0.2em] text-wave-pink/80">
             Songarr Wave
           </p>
         </div>
         <div className="mb-4 flex flex-wrap justify-center gap-2">
-          <SetupStep index={1} active={step === 1}>Сервер</SetupStep>
-          <SetupStep index={2} active={step === 2}>Вход</SetupStep>
-          <SetupStep index={3} active={step === 3}>Звук</SetupStep>
+          <SetupStep index={1} active={step === 1}>{t("server")}</SetupStep>
+          <SetupStep index={2} active={step === 2}>{t("login")}</SetupStep>
+          <SetupStep index={3} active={step === 3}>{t("sound")}</SetupStep>
         </div>
 
         {step === 1 && (
@@ -234,7 +216,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
               type="submit"
               className="w-full rounded-xl bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-3 text-base font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-[0.98]"
             >
-              Далее
+              {t("next")}
             </button>
           </form>
         )}
@@ -248,7 +230,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
               {serverUrl}
             </p>
             <label className="block">
-              <span className="mb-1.5 block text-sm font-semibold">Username</span>
+              <span className="mb-1.5 block text-sm font-semibold">{t("username")}</span>
               <input
                 className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
                 autoComplete="username"
@@ -258,7 +240,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
               />
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-sm font-semibold">Password</span>
+              <span className="mb-1.5 block text-sm font-semibold">{t("password")}</span>
               <input
                 className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
                 type="password"
@@ -279,14 +261,14 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
                 onClick={() => setStep(1)}
                 className="rounded-xl border border-black/10 px-4 py-3 text-sm font-bold text-neutral-600 transition active:scale-[0.98] dark:border-white/10 dark:text-neutral-300"
               >
-                Назад
+                {t("back")}
               </button>
               <button
                 type="submit"
                 disabled={busy}
                 className="flex-1 rounded-xl bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-3 text-base font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-[0.98] disabled:opacity-60"
               >
-                {busy ? "Проверяю..." : "Войти"}
+                {busy ? t("checking") : t("signIn")}
               </button>
             </div>
           </form>
@@ -296,7 +278,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
           <div className="space-y-4 rounded-xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-neutral-500">
-                Качество стрима
+                {t("streamQuality")}
               </p>
               <QualityButtons
                 value={streamQuality}
@@ -306,7 +288,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
             </div>
             <div>
               <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-neutral-500">
-                Качество загрузок
+                {t("downloadQuality")}
               </p>
               <QualityButtons
                 value={downloadQuality}
@@ -316,7 +298,7 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
             </div>
             {waveStatus === "ok" ? (
               <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-600 dark:text-emerald-300">
-                Волна отвечает. Можно слушать.
+                {t("waveOk")}
               </p>
             ) : null}
             {error ? (
@@ -331,14 +313,14 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
                 disabled={busy}
                 className="rounded-xl border border-black/10 px-4 py-3 text-sm font-bold text-neutral-600 transition active:scale-[0.98] disabled:opacity-60 dark:border-white/10 dark:text-neutral-300"
               >
-                {busy ? "Проверяю..." : "Проверить волну"}
+                {busy ? t("checking") : t("waveCheck")}
               </button>
               <button
                 type="button"
                 onClick={finish}
                 className="flex-1 rounded-xl bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-3 text-base font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-[0.98]"
               >
-                Начать
+                {t("start")}
               </button>
             </div>
           </div>
@@ -362,6 +344,8 @@ function CurrentScreen({ route, onLogout }: { route: Route; onLogout: () => void
       return <PlaylistsView />;
     case "liked":
       return <LikedView />;
+    case "downloads":
+      return <DownloadsView />;
     case "imports":
       return <ImportsView />;
     case "artist":
@@ -377,15 +361,16 @@ function CurrentScreen({ route, onLogout }: { route: Route; onLogout: () => void
   }
 }
 
-const TABS: { tab: TabName; label: string; icon: typeof WaveIcon }[] = [
-  { tab: "home", label: "Волна", icon: WaveIcon },
-  { tab: "search", label: "Поиск", icon: SearchIcon },
-  { tab: "library", label: "Медиатека", icon: LibraryIcon },
-  { tab: "playlists", label: "Плейлисты", icon: PlaylistIcon },
+const TABS: { tab: TabName; label: MessageKey; icon: typeof WaveIcon }[] = [
+  { tab: "home", label: "wave", icon: WaveIcon },
+  { tab: "search", label: "search", icon: SearchIcon },
+  { tab: "library", label: "library", icon: LibraryIcon },
+  { tab: "playlists", label: "playlists", icon: PlaylistIcon },
 ];
 
 function DesktopSidebar({ activeTab }: { activeTab: TabName }) {
   const nav = useNav();
+  const { t } = useI18n();
   return (
     <aside className="hidden min-h-dvh border-r border-wave-pink/10 px-5 py-6 lg:flex lg:flex-col">
       <button
@@ -425,7 +410,7 @@ function DesktopSidebar({ activeTab }: { activeTab: TabName }) {
               }`}
             >
               <Icon className={`h-5 w-5 ${active ? "text-wave-pink" : ""}`} />
-              {label}
+              {t(label)}
             </button>
           );
         })}
@@ -436,7 +421,15 @@ function DesktopSidebar({ activeTab }: { activeTab: TabName }) {
         className="mt-6 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-neutral-500 transition hover:bg-white/[0.04] hover:text-neutral-200"
       >
         <DownloadIcon className="h-5 w-5" />
-        Импорт
+        {t("imports")}
+      </button>
+      <button
+        type="button"
+        onClick={() => nav.push({ name: "downloads" })}
+        className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-bold text-neutral-500 transition hover:bg-white/[0.04] hover:text-neutral-200"
+      >
+        <DownloadIcon className="h-5 w-5" />
+        {t("downloaded")}
       </button>
 
     </aside>
@@ -444,6 +437,7 @@ function DesktopSidebar({ activeTab }: { activeTab: TabName }) {
 }
 
 function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => void }) {
+  const { t } = useI18n();
   const [stack, setStack] = useState<Route[]>([{ name: "home" }]);
   const [npOpen, setNpOpen] = useState(false);
   const route = stack[stack.length - 1];
@@ -470,7 +464,7 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
                 {route.name === "home" && (
                   <header className="mb-6 flex items-center gap-3 lg:hidden">
                     <h1 className="flex-1 text-[28px] font-extrabold tracking-tight">
-                      Музыка
+                      {t("appMusic")}
                     </h1>
                     <button
                       type="button"
@@ -522,7 +516,7 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
                           active ? "-translate-y-0.5 scale-110" : ""
                         }`}
                       />
-                      {label}
+                      {t(label)}
                     </button>
                   );
                 })}
@@ -538,7 +532,7 @@ function Shell({ session, onLogout }: { session: WaveSession; onLogout: () => vo
   );
 }
 
-export default function App() {
+function AppInner() {
   const [session, setSession] = useState<WaveSession | null>(() => loadSession());
 
   useEffect(() => {
@@ -560,5 +554,13 @@ export default function App() {
         setSession(null);
       }}
     />
+  );
+}
+
+export default function App() {
+  return (
+    <I18nProvider>
+      <AppInner />
+    </I18nProvider>
   );
 }

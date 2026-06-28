@@ -414,6 +414,10 @@ export function getLyrics(
   return promise;
 }
 
+export function clearLyricsCache(songId: string): void {
+  lyricsCache.delete(songId);
+}
+
 async function fetchLyrics(
   session: WaveSession,
   songId: string,
@@ -678,7 +682,7 @@ export async function joinListen(session: WaveSession, code: string): Promise<Li
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ code }),
   });
-  if (!response.ok) throw new Error(response.status === 404 ? "Комната не найдена" : `HTTP ${response.status}`);
+  if (!response.ok) throw new Error(response.status === 404 ? "Room not found" : `HTTP ${response.status}`);
   return listenStateFromRaw((await response.json()) as RawListenState);
 }
 

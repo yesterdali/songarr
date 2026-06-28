@@ -51,6 +51,7 @@ export function PlayBar({ onOpen }: { onOpen: () => void }) {
           <button type="button" onClick={onOpen} aria-label="open player" className="shrink-0">
             <Cover
               coverArt={current.coverArt}
+              downloadId={current.id}
               size={120}
               rounded="rounded-lg"
               className="h-14 w-14 shadow-md ring-1 ring-white/10"
