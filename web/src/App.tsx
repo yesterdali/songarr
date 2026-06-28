@@ -4,10 +4,12 @@ import {
   createSession,
   loadLastServerUrl,
   loadSession,
+  normalizeServerUrl,
   saveSession,
   validateSession,
   type WaveSession,
 } from "./auth";
+import { getWaveNext } from "./api";
 import {
   AccountButton,
   Avatar,
@@ -23,6 +25,14 @@ import { DownloadsProvider } from "./downloads";
 import { NavProvider, useNav, type Route, type TabName } from "./nav";
 import { PlayerProvider } from "./player";
 import {
+  getDownloadQuality,
+  getStreamQuality,
+  setDownloadQuality,
+  setStreamQuality,
+  type DownloadQuality,
+  type StreamQuality,
+} from "./quality";
+import {
   AlbumsView,
   AlbumView,
   ArtistLookupView,
@@ -36,28 +46,148 @@ import {
   SettingsView,
 } from "./views";
 
+const STREAM_QUALITY_CHOICES: [StreamQuality, string][] = [
+  ["auto", "Авто"],
+  ["low", "96"],
+  ["normal", "192"],
+  ["high", "320"],
+  ["lossless", "Оригинал"],
+];
+
+const DOWNLOAD_QUALITY_CHOICES: [DownloadQuality, string][] = [
+  ["low", "96"],
+  ["normal", "192"],
+  ["high", "320"],
+  ["lossless", "Оригинал"],
+];
+
+function SetupStep({
+  index,
+  active,
+  children,
+}: {
+  index: number;
+  active: boolean;
+  children: string;
+}) {
+  return (
+    <span
+      className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${
+        active
+          ? "bg-wave-pink/15 text-wave-pink ring-1 ring-wave-pink/25"
+          : "bg-black/[0.04] text-neutral-500 dark:bg-white/[0.04]"
+      }`}
+    >
+      <span className="grid h-5 w-5 place-items-center rounded-full bg-current/10 text-[11px]">
+        {index}
+      </span>
+      {children}
+    </span>
+  );
+}
+
+function QualityButtons<T extends string>({
+  value,
+  choices,
+  onChange,
+}: {
+  value: T;
+  choices: [T, string][];
+  onChange: (value: T) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      {choices.map(([choice, label]) => (
+        <button
+          key={choice}
+          type="button"
+          onClick={() => onChange(choice)}
+          className={`rounded-xl border px-3 py-2 text-sm font-bold transition active:scale-95 ${
+            value === choice
+              ? "border-wave-pink/40 bg-wave-pink/10 text-wave-pink"
+              : "border-black/10 text-neutral-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
+          }`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
   const [serverUrl, setServerUrl] = useState(() => loadLastServerUrl());
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [draftSession, setDraftSession] = useState<WaveSession | null>(null);
+  const [streamQuality, setStreamQualityState] = useState<StreamQuality>(getStreamQuality);
+  const [downloadQuality, setDownloadQualityState] =
+    useState<DownloadQuality>(getDownloadQuality);
+  const [waveStatus, setWaveStatus] = useState<"idle" | "ok" | "warn">("idle");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  async function submit(event: FormEvent<HTMLFormElement>) {
+  function nextServer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError("");
+    const normalized = normalizeServerUrl(serverUrl);
+    try {
+      new URL(normalized);
+    } catch {
+      setError("Проверь адрес Songarr");
+      return;
+    }
+    setServerUrl(normalized);
+    setStep(2);
+  }
+
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setWaveStatus("idle");
     setBusy(true);
     try {
       const session = createSession(username, password, serverUrl);
       await validateSession(session);
-      saveSession(session);
+      setDraftSession(session);
       setPassword("");
-      onLogin(session);
+      setStep(3);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Login failed");
+      setError(err instanceof Error ? err.message : "Не удалось войти");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function testWave() {
+    const session = draftSession;
+    if (!session) return;
+    setError("");
+    setBusy(true);
+    try {
+      const songs = await getWaveNext(session, { count: 1 });
+      if (songs.length === 0) {
+        setWaveStatus("warn");
+        setError("Волна пока не вернула треки. Войти можно, но рекомендации могут появиться позже.");
+      } else {
+        setWaveStatus("ok");
+      }
+    } catch (err) {
+      setWaveStatus("warn");
+      setError(err instanceof Error ? err.message : "Не удалось проверить волну");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function finish() {
+    const session = draftSession;
+    if (!session) return;
+    setStreamQuality(streamQuality);
+    setDownloadQuality(downloadQuality);
+    saveSession(session);
+    onLogin(session);
   }
 
   return (
@@ -72,56 +202,147 @@ function LoginScreen({ onLogin }: { onLogin: (session: WaveSession) => void }) {
             Songarr Wave
           </p>
         </div>
-        <form
-          className="space-y-4 rounded-xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]"
-          onSubmit={submit}
-        >
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-semibold">Songarr URL</span>
-            <input
-              className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
-              autoComplete="url"
-              inputMode="url"
-              placeholder="https://songarr.example.com"
-              value={serverUrl}
-              onChange={(event) => setServerUrl(event.target.value)}
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-semibold">Username</span>
-            <input
-              className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
-              autoComplete="username"
-              value={username}
-              onChange={(event) => setUsername(event.target.value)}
-              required
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-semibold">Password</span>
-            <input
-              className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              required
-            />
-          </label>
-          {error ? (
-            <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-300">
-              {error}
-            </p>
-          ) : null}
-          <button
-            type="submit"
-            disabled={busy}
-            className="w-full rounded-xl bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-3 text-base font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-[0.98] disabled:opacity-60"
+        <div className="mb-4 flex flex-wrap justify-center gap-2">
+          <SetupStep index={1} active={step === 1}>Сервер</SetupStep>
+          <SetupStep index={2} active={step === 2}>Вход</SetupStep>
+          <SetupStep index={3} active={step === 3}>Звук</SetupStep>
+        </div>
+
+        {step === 1 && (
+          <form
+            className="space-y-4 rounded-xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]"
+            onSubmit={nextServer}
           >
-            {busy ? "Checking..." : "Log in"}
-          </button>
-        </form>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold">Songarr URL</span>
+              <input
+                className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
+                autoComplete="url"
+                inputMode="url"
+                placeholder="https://songarr.example.com"
+                value={serverUrl}
+                onChange={(event) => setServerUrl(event.target.value)}
+                required
+              />
+            </label>
+            {error ? (
+              <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-300">
+                {error}
+              </p>
+            ) : null}
+            <button
+              type="submit"
+              className="w-full rounded-xl bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-3 text-base font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-[0.98]"
+            >
+              Далее
+            </button>
+          </form>
+        )}
+
+        {step === 2 && (
+          <form
+          className="space-y-4 rounded-xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]"
+            onSubmit={submitLogin}
+          >
+            <p className="truncate rounded-xl bg-black/[0.04] px-4 py-3 text-sm font-semibold text-neutral-500 dark:bg-white/[0.04]">
+              {serverUrl}
+            </p>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold">Username</span>
+              <input
+                className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
+                autoComplete="username"
+                value={username}
+                onChange={(event) => setUsername(event.target.value)}
+                required
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-semibold">Password</span>
+              <input
+                className="w-full rounded-xl border border-black/10 bg-white px-4 py-3 text-base outline-none transition focus:border-wave-pink focus:ring-2 focus:ring-wave-pink/25 dark:border-white/10 dark:bg-white/5"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+              />
+            </label>
+            {error ? (
+              <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-300">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setStep(1)}
+                className="rounded-xl border border-black/10 px-4 py-3 text-sm font-bold text-neutral-600 transition active:scale-[0.98] dark:border-white/10 dark:text-neutral-300"
+              >
+                Назад
+              </button>
+              <button
+                type="submit"
+                disabled={busy}
+                className="flex-1 rounded-xl bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-3 text-base font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-[0.98] disabled:opacity-60"
+              >
+                {busy ? "Проверяю..." : "Войти"}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {step === 3 && (
+          <div className="space-y-4 rounded-xl border border-black/5 bg-white/70 p-6 shadow-xl shadow-black/5 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.04]">
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-neutral-500">
+                Качество стрима
+              </p>
+              <QualityButtons
+                value={streamQuality}
+                choices={STREAM_QUALITY_CHOICES}
+                onChange={setStreamQualityState}
+              />
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-bold uppercase tracking-[0.16em] text-neutral-500">
+                Качество загрузок
+              </p>
+              <QualityButtons
+                value={downloadQuality}
+                choices={DOWNLOAD_QUALITY_CHOICES}
+                onChange={setDownloadQualityState}
+              />
+            </div>
+            {waveStatus === "ok" ? (
+              <p className="rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm font-medium text-emerald-600 dark:text-emerald-300">
+                Волна отвечает. Можно слушать.
+              </p>
+            ) : null}
+            {error ? (
+              <p className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm font-medium text-red-600 dark:text-red-300">
+                {error}
+              </p>
+            ) : null}
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={testWave}
+                disabled={busy}
+                className="rounded-xl border border-black/10 px-4 py-3 text-sm font-bold text-neutral-600 transition active:scale-[0.98] disabled:opacity-60 dark:border-white/10 dark:text-neutral-300"
+              >
+                {busy ? "Проверяю..." : "Проверить волну"}
+              </button>
+              <button
+                type="button"
+                onClick={finish}
+                className="flex-1 rounded-xl bg-gradient-to-r from-wave-orange via-wave-pink to-wave-violet px-5 py-3 text-base font-bold text-white shadow-lg shadow-wave-pink/30 transition active:scale-[0.98]"
+              >
+                Начать
+              </button>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );
