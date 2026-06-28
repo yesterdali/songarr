@@ -1,7 +1,14 @@
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import * as api from "./api";
 import { Avatar, Cover, DownloadAllButton, SongRow } from "./components";
-import { getStreamQuality, setStreamQuality, type StreamQuality } from "./quality";
+import {
+  getDownloadQuality,
+  getStreamQuality,
+  setDownloadQuality,
+  setStreamQuality,
+  type DownloadQuality,
+  type StreamQuality,
+} from "./quality";
 import {
   ChevronLeftIcon,
   GothicCrossIcon,
@@ -654,7 +661,9 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
   const [busy, setBusy] = useState(false);
   const [avatarVer, setAvatarVer] = useState(1);
   const [error, setError] = useState<string | null>(null);
-  const [quality, setQuality] = useState<StreamQuality>(getStreamQuality);
+  const [streamQuality, setStreamQualityState] = useState<StreamQuality>(getStreamQuality);
+  const [downloadQuality, setDownloadQualityState] =
+    useState<DownloadQuality>(getDownloadQuality);
 
   useEffect(() => {
     api
@@ -755,24 +764,28 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
       </section>
       <section className="mb-8">
         <SectionTitle>Качество звука</SectionTitle>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
+          Стрим
+        </p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
           {(
             [
               ["auto", "Авто"],
               ["low", "Низкое · 96"],
               ["normal", "Среднее · 192"],
               ["high", "Высокое · 320"],
+              ["lossless", "Оригинал"],
             ] as [StreamQuality, string][]
           ).map(([value, label]) => (
             <button
               key={value}
               type="button"
               onClick={() => {
-                setQuality(value);
+                setStreamQualityState(value);
                 setStreamQuality(value);
               }}
               className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition active:scale-95 ${
-                quality === value
+                streamQuality === value
                   ? "border-wave-pink/40 bg-wave-pink/10 text-wave-pink"
                   : "border-black/10 text-neutral-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
               }`}
@@ -782,7 +795,40 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
           ))}
         </div>
         <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
-          Применяется к этому устройству. «Авто» подстраивается под сеть.
+          Применяется к этому устройству. «Авто» подстраивается под сеть, «Оригинал» при ошибке
+          декодирования откатится на MP3 320.
+        </p>
+        <p className="mb-2 mt-5 text-xs font-semibold uppercase tracking-[0.16em] text-neutral-500">
+          Загрузки
+        </p>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {(
+            [
+              ["low", "Низкое · 96"],
+              ["normal", "Среднее · 192"],
+              ["high", "Высокое · 320"],
+              ["lossless", "Оригинал"],
+            ] as [DownloadQuality, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setDownloadQualityState(value);
+                setDownloadQuality(value);
+              }}
+              className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition active:scale-95 ${
+                downloadQuality === value
+                  ? "border-wave-pink/40 bg-wave-pink/10 text-wave-pink"
+                  : "border-black/10 text-neutral-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+          Применяется только к новым скачиваниям. Уже сохраненные треки не меняются.
         </p>
       </section>
       <section>

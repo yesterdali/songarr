@@ -10,6 +10,7 @@ import {
 } from "react";
 import { streamUrl } from "./api";
 import type { WaveSession } from "./auth";
+import { getDownloadQuality } from "./quality";
 import type { Song } from "./types";
 
 // ---- IndexedDB layer: audio blobs stored for offline / instant playback ----
@@ -75,7 +76,7 @@ async function deleteDownload(id: string): Promise<void> {
 }
 
 async function saveDownload(session: WaveSession, song: Song): Promise<void> {
-  const url = song.streamUrl ?? streamUrl(session, song.id);
+  const url = song.streamUrl ?? streamUrl(session, song.id, getDownloadQuality());
   const response = await fetch(url, { headers: { Accept: "audio/*" } });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const blob = await response.blob();

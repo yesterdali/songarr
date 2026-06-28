@@ -23,6 +23,7 @@ import { avatarUrl, getFriends, getLyrics, getProfile } from "./api";
 import { useDownloads } from "./downloads";
 import { useNav } from "./nav";
 import { formatTime, usePlayer } from "./player";
+import { getStreamQuality, qualityLabel } from "./quality";
 import type { FriendActivity, LyricsResult, Profile, Song } from "./types";
 
 /** A user's avatar (image), falling back to their initial if none is set. */
@@ -625,6 +626,9 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
   const progress = displayDuration
     ? Math.min((displayTime / displayDuration) * 100, 100)
     : 0;
+  const streamQuality = getStreamQuality();
+  const qualityReadout =
+    streamQuality === "lossless" && current.provider ? "Лучшее доступное" : qualityLabel(streamQuality);
   const openArtist = () => {
     onClose();
     if (current.artistId) {
@@ -711,6 +715,9 @@ export function NowPlayingScreen({ onClose }: { onClose: () => void }) {
                 {current.album}
               </button>
             )}
+            <p className="mt-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">
+              {qualityReadout}
+            </p>
           </div>
           <DownloadButton song={current} className="h-7 w-7" size="h-7 w-7" />
           <button

@@ -33,6 +33,7 @@ import {
 } from "./api";
 import type { WaveSession } from "./auth";
 import { useDownloads } from "./downloads";
+import { getStreamQuality } from "./quality";
 import type { ListenEvent, ListenMember, ListenState, RemoteState, Song } from "./types";
 
 /** A track reduced to the fields the bot needs in a remote `play` command. */
@@ -139,8 +140,12 @@ export function PlayerProvider({
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const preloadsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
   const detachRef = useRef<(() => void) | null>(null);
+  const retryLosslessRef = useRef<(audio: HTMLAudioElement) => boolean>(() => false);
+  const losslessFallbackIdsRef = useRef<Set<string>>(new Set());
   const timingFrameRef = useRef<number | null>(null);
   const wavePrefetchRef = useRef<{ promise: Promise<Song[]>; at: number } | null>(null);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   const [queue, setQueue] = useState<Song[]>([]);
   const [index, setIndex] = useState(0);
@@ -188,6 +193,25 @@ export function PlayerProvider({
   const preShuffleRef = useRef<Song[] | null>(null);
 
   const current = queue[index] ?? null;
+  const currentRef = useRef<Song | null>(null);
+  currentRef.current = current;
+
+  retryLosslessRef.current = (audio) => {
+    const song = currentRef.current;
+    if (!song || losslessFallbackIdsRef.current.has(song.id)) return false;
+    const wasOfflineBlob = audio.src.startsWith("blob:");
+    if (getStreamQuality() !== "lossless" && !wasOfflineBlob) return false;
+    losslessFallbackIdsRef.current.add(song.id);
+    console.info("lossless/original stream failed; retrying mp3 fallback", song.id);
+    audio.src = streamUrl(sessionRef.current, song.id, "high");
+    audio.load();
+    if (!listenCodeRef.current || listenStateRef.current?.isPlaying) {
+      audio.play().catch(() => {
+        if (listenCodeRef.current) setListenNeedsUnlock(true);
+      });
+    }
+    return true;
+  };
 
   const cover = useCallback(
     (coverArt: string | undefined, size = 200) => coverUrl(session, coverArt, size),
@@ -342,6 +366,10 @@ export function PlayerProvider({
       setCurrentTime(audio.currentTime);
       setDuration(audioDuration(audio, fallbackDuration));
     };
+    const onError = () => {
+      syncTiming();
+      retryLosslessRef.current(audio);
+    };
     const tickTiming = () => {
       syncTiming();
       if (!audio.paused && !audio.ended) {
@@ -370,7 +398,7 @@ export function PlayerProvider({
     audio.addEventListener("loadeddata", syncTiming);
     audio.addEventListener("canplay", syncTiming);
     audio.addEventListener("emptied", syncTiming);
-    audio.addEventListener("error", syncTiming);
+    audio.addEventListener("error", onError);
     audio.addEventListener("play", syncPlayback);
     audio.addEventListener("playing", syncPlayback);
     audio.addEventListener("pause", syncPlayback);
@@ -385,7 +413,7 @@ export function PlayerProvider({
       audio.removeEventListener("loadeddata", syncTiming);
       audio.removeEventListener("canplay", syncTiming);
       audio.removeEventListener("emptied", syncTiming);
-      audio.removeEventListener("error", syncTiming);
+      audio.removeEventListener("error", onError);
       audio.removeEventListener("play", syncPlayback);
       audio.removeEventListener("playing", syncPlayback);
       audio.removeEventListener("pause", syncPlayback);
