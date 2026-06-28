@@ -26,8 +26,13 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 export function audioDuration(audio: HTMLAudioElement, fallback?: number): number {
+  // Prefer the known track length. A transcoded / progressively-downloaded
+  // source reports an audio.duration that grows as bytes arrive, which makes
+  // the progress bar jump up then back down early in playback. The metadata
+  // duration is stable, so trust it whenever we have it.
+  if (fallback && Number.isFinite(fallback) && fallback > 0) return fallback;
   if (Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration;
-  return fallback && Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
+  return 0;
 }
 
 export function loadVolume(): number {

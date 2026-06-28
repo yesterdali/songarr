@@ -76,4 +76,20 @@ lift for least work. #2 is a broader consistency pass to follow.
       - Primary CTA gradient unified on the 3-stop signature (ember→crimson→plum):
         upgraded PlayAll, Save, and Shuffle-downloads from the flat 2-stop. Thin
         progress/seek bars stay 2-stop intentionally.
-- [ ] Papercuts: humanize raw error text; hover-reveal row actions on desktop
+- [x] Playbar progress jitter fix: the progress bar denominator was the audio
+      element's `audio.duration`, which grows as a transcoded/streamed track
+      downloads — so the bar hopped up then down early on. `audioDuration()` now
+      prefers the stable metadata duration, and a `fallbackDurationRef` keeps it
+      available on the reused (src-swap) audio element. Verified live: total stays
+      2:32 while time advances and the bar width climbs monotonically. Guarded by
+      player-utils.test.ts.
+
+### Verified live (logged into real Navidrome)
+- #2 quality `Segmented` chips (onboarding), 3-stop "Start" gradient
+- #2 Home "LIKED" header now the unified gothic-rule `SectionTitle` + "All"
+- #2 Albums sort filter is now pink-tint chips (was the white-pill track)
+- Playbar progress is smooth/monotonic
+
+### Remaining (not started)
+- [ ] Humanize raw error text (e.g. "Server returned HTTP 500") — deferred per user
+- [ ] Hover-reveal row actions on desktop (calm long lists)

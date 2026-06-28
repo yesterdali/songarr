@@ -52,6 +52,10 @@ export function PlayerProvider({
   const retryLosslessRef = useRef<(audio: HTMLAudioElement) => boolean>(() => false);
   const losslessFallbackIdsRef = useRef<Set<string>>(new Set());
   const timingFrameRef = useRef<number | null>(null);
+  // The current track's known metadata duration. Kept in a ref so the audio
+  // element's timing listeners (attached once, reused across tracks) always see
+  // a stable duration instead of the streamed source's growing audio.duration.
+  const fallbackDurationRef = useRef<number | undefined>(undefined);
   const wavePrefetchRef = useRef<{ promise: Promise<Song[]>; at: number } | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
@@ -253,6 +257,7 @@ export function PlayerProvider({
   /** Make `audio` the active element: move listeners and state over to it. */
   const attach = useCallback((audio: HTMLAudioElement, fallbackDuration?: number) => {
     detachRef.current?.();
+    fallbackDurationRef.current = fallbackDuration;
     const stopSmoothTiming = () => {
       if (timingFrameRef.current !== null) {
         window.cancelAnimationFrame(timingFrameRef.current);
@@ -261,7 +266,7 @@ export function PlayerProvider({
     };
     const syncTiming = () => {
       setCurrentTime(audio.currentTime);
-      setDuration(audioDuration(audio, fallbackDuration));
+      setDuration(audioDuration(audio, fallbackDurationRef.current));
     };
     const onError = () => {
       syncTiming();
@@ -350,6 +355,7 @@ export function PlayerProvider({
   // preloaded, swap elements and start instantly.
   useEffect(() => {
     if (!current || remoteOnRef.current) return; // remote: the bot plays, not us
+    fallbackDurationRef.current = current.duration; // stable denominator for the progress bar
     const preloaded = preloadsRef.current.get(current.id);
     if (preloaded) {
       preloadsRef.current.delete(current.id);
