@@ -1,130 +1,37 @@
-// Playback engine: a single <audio>, a queue, and Media Session wiring, shared
-// by every screen (and, later, the Wave button). Finite queue for Phase 2;
-// Wave's endless auto-extend hooks the same `playQueue`/`next` in Phase 1.
-
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   coverUrl,
   createListen,
   getLyrics,
   getListenState,
   getRemoteState,
-  getServerTime,
-  getStarred,
   getWaveNext,
   joinListen as apiJoinListen,
   leaveListen as apiLeaveListen,
   listenCommand,
   remoteCommand,
   reportNowPlaying,
-  star,
   streamUrl,
-  unstar,
   waveFeedback,
 } from "./api";
 import type { WaveSession } from "./auth";
+import { PlayerContext, type PlayerValue, type RepeatMode } from "./player-context";
+import {
+  audioDuration,
+  clamp,
+  estimateServerClockOffset,
+  loadVolume,
+  remotePlaybackSeconds,
+  saveVolume,
+  toRemoteTrack,
+} from "./player-utils";
+import { useStarredTracks } from "./player-stars";
 import { useDownloads } from "./downloads";
 import { getStreamQuality } from "./quality";
-import type { ListenEvent, ListenMember, ListenState, RemoteState, Song } from "./types";
+import type { ListenState, RemoteState, Song } from "./types";
 
-/** A track reduced to the fields the bot needs in a remote `play` command. */
-function toRemoteTrack(song: Song) {
-  return {
-    id: song.id,
-    title: song.title,
-    artist: song.artist,
-    album: song.album ?? null,
-    coverArt: song.coverArt ?? null,
-    duration: song.duration ?? null,
-    durationMs: song.duration ? Math.round(song.duration * 1000) : null,
-    provider: song.provider ?? null,
-    artistId: song.artistId ?? null,
-    albumId: song.albumId ?? null,
-  };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max);
-}
-
-export type RepeatMode = "off" | "all" | "one";
-
-type PlayerValue = {
-  session: WaveSession;
-  queue: Song[];
-  index: number;
-  current: Song | null;
-  isPlaying: boolean;
-  currentTime: number;
-  duration: number;
-  isWave: boolean;
-  repeat: RepeatMode;
-  shuffle: boolean;
-  volume: number;
-  muted: boolean;
-  /** Remote control: true while the app is driving the Discord bot. */
-  remoteOn: boolean;
-  /** True once the bot has actually joined voice (fresh heartbeat). */
-  remoteConnected: boolean;
-  /** Bot is busy in another voice channel of the server. */
-  remoteBusy: boolean;
-  connectRemote: () => void;
-  disconnectRemote: () => void;
-  /** Listen Together: the room code if in one, else null. */
-  listenCode: string | null;
-  listenMembers: ListenMember[];
-  listenEvents: ListenEvent[];
-  startListen: () => Promise<string>;
-  joinListen: (code: string) => Promise<void>;
-  leaveListen: () => void;
-  sendListenReaction: (emoji: string) => void;
-  sendListenChat: (text: string) => void;
-  playQueue: (songs: Song[], startIndex?: number) => void;
-  startWave: () => Promise<void>;
-  toggle: () => void;
-  next: () => void;
-  prev: () => void;
-  seek: (seconds: number) => void;
-  cycleRepeat: () => void;
-  toggleShuffle: () => void;
-  moreLikeCurrent: () => Promise<void>;
-  setVolume: (value: number) => void;
-  toggleMute: () => void;
-  isStarred: (id: string) => boolean;
-  toggleStar: (id: string) => void;
-  dislikeCurrent: () => void;
-  cover: (coverArt: string | undefined, size?: number) => string | undefined;
-};
-
-const PlayerContext = createContext<PlayerValue | null>(null);
-
-export function usePlayer(): PlayerValue {
-  const value = useContext(PlayerContext);
-  if (!value) throw new Error("usePlayer used outside PlayerProvider");
-  return value;
-}
-
-function audioDuration(audio: HTMLAudioElement, fallback?: number): number {
-  if (Number.isFinite(audio.duration) && audio.duration > 0) return audio.duration;
-  return fallback && Number.isFinite(fallback) && fallback > 0 ? fallback : 0;
-}
-
-const VOLUME_KEY = "songarr.wave.volume.v1";
-
-function loadVolume(): number {
-  const raw = localStorage.getItem(VOLUME_KEY);
-  const parsed = raw ? Number(raw) : 0.85;
-  return Number.isFinite(parsed) ? clamp(parsed, 0, 1) : 0.85;
-}
+export { usePlayer } from "./player-context";
+export { formatTime } from "./player-utils";
 
 export function PlayerProvider({
   session,
@@ -153,7 +60,6 @@ export function PlayerProvider({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [isWave, setIsWave] = useState(false);
   const [repeat, setRepeat] = useState<RepeatMode>("off");
   const [shuffle, setShuffle] = useState(false);
@@ -179,6 +85,7 @@ export function PlayerProvider({
   listenStateRef.current = listenState;
 
   const downloads = useDownloads();
+  const { isStarred, toggleStar } = useStarredTracks(session);
   const getPlayableUrl = downloads.getPlayableUrl; // stable identity
   // Latest values for callbacks/listeners that must stay stable across renders.
   const downloadsRef = useRef(downloads);
@@ -236,20 +143,7 @@ export function PlayerProvider({
   );
 
   const estimateListenClockOffset = useCallback(async () => {
-    let bestOffset = 0;
-    let bestRtt = Number.POSITIVE_INFINITY;
-    for (let i = 0; i < 4; i += 1) {
-      const started = Date.now();
-      const serverMs = await getServerTime(session);
-      const ended = Date.now();
-      const rtt = ended - started;
-      if (rtt < bestRtt) {
-        bestRtt = rtt;
-        bestOffset = serverMs + rtt / 2 - ended;
-      }
-      await new Promise((resolve) => window.setTimeout(resolve, 30));
-    }
-    setListenClockOffsetMs(bestOffset);
+    setListenClockOffsetMs(await estimateServerClockOffset(session));
   }, [session]);
 
   /** Warm the browser cache with a song's covers: the full-screen size and
@@ -442,7 +336,7 @@ export function PlayerProvider({
   }, [attach]);
 
   useEffect(() => {
-    localStorage.setItem(VOLUME_KEY, String(volume));
+    saveVolume(volume);
     for (const audio of [audioRef.current, ...preloadsRef.current.values()]) {
       if (!audio) continue;
       audio.volume = volume;
@@ -728,19 +622,6 @@ export function PlayerProvider({
     if (remoteOn) audioRef.current?.pause();
   }, [remoteOn]);
 
-  // Seed liked-track ids once.
-  useEffect(() => {
-    let cancelled = false;
-    getStarred(session)
-      .then((starred) => {
-        if (!cancelled) setStarredIds(new Set(starred.songs.map((s) => s.id)));
-      })
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [session]);
-
   // Keep repeat-one's gapless loop flag in sync with the live element.
   useEffect(() => {
     repeatRef.current = repeat;
@@ -990,33 +871,6 @@ export function PlayerProvider({
     [dispatchListen, dispatchRemote],
   );
 
-  const isStarred = useCallback((id: string) => starredIds.has(id), [starredIds]);
-
-  const toggleStar = useCallback(
-    (id: string) => {
-      setStarredIds((prevSet) => {
-        const nextSet = new Set(prevSet);
-        const wasStarred = nextSet.has(id);
-        if (wasStarred) nextSet.delete(id);
-        else nextSet.add(id);
-        if (!wasStarred) {
-          waveFeedback(session, id, "like").catch(() => undefined);
-        }
-        (wasStarred ? unstar(session, id) : star(session, id)).catch(() => {
-          // revert on failure
-          setStarredIds((s) => {
-            const reverted = new Set(s);
-            if (wasStarred) reverted.add(id);
-            else reverted.delete(id);
-            return reverted;
-          });
-        });
-        return nextSet;
-      });
-    },
-    [session],
-  );
-
   const dislikeCurrent = useCallback(() => {
     if (remoteOnRef.current) {
       dispatchRemote("next");
@@ -1036,15 +890,7 @@ export function PlayerProvider({
 
   // Exposed playback view: the bot's reported state while remote, else local.
   // Remote position is interpolated from the last poll so the bar moves live.
-  const remoteSecs = (() => {
-    const s = remoteState;
-    if (!remoteOn || !s) return 0;
-    const base = (s.positionMs ?? 0) / 1000;
-    if (!s.isPlaying) return base;
-    const dur = (s.durationMs ?? 0) / 1000;
-    const t = base + (Date.now() - s.fetchedAt) / 1000;
-    return dur > 0 ? Math.min(t, dur) : t;
-  })();
+  const remoteSecs = remotePlaybackSeconds(remoteOn, remoteState);
   const exposedCurrent = remoteOn ? remoteState?.song ?? null : current;
   const exposedIsPlaying = remoteOn ? remoteState?.isPlaying ?? false : isPlaying;
   const exposedTime = remoteOn ? remoteSecs : currentTime;
@@ -1148,12 +994,4 @@ export function PlayerProvider({
   );
 
   return <PlayerContext.Provider value={value}>{children}</PlayerContext.Provider>;
-}
-
-export function formatTime(seconds: number): string {
-  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
-  const total = Math.floor(seconds);
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }

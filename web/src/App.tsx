@@ -16,10 +16,9 @@ import {
   DiscordConnectToggle,
   FriendsPanel,
   ListenTogetherPanel,
-  NowPlayingBar,
-  NowPlayingScreen,
-  PlayBar,
 } from "./components";
+import { NowPlayingBar, NowPlayingScreen } from "./now-playing";
+import { PlayBar } from "./playbar";
 import { DownloadIcon, LibraryIcon, PlaylistIcon, SearchIcon, WaveIcon } from "./icons";
 import { DownloadsProvider } from "./downloads";
 import { NavProvider, useNav, type Route, type TabName } from "./nav";
@@ -38,14 +37,14 @@ import {
   ArtistLookupView,
   ArtistView,
   HomeView,
-  ImportsView,
   LibraryView,
   LikedView,
   PlaylistsView,
   PlaylistView,
   SearchView,
-  SettingsView,
 } from "./views";
+import { ImportsView } from "./views-imports";
+import { SettingsView } from "./views-settings";
 
 const STREAM_QUALITY_CHOICES: [StreamQuality, string][] = [
   ["auto", "Авто"],
