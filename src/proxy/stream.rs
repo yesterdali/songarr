@@ -35,12 +35,16 @@ const KEEP_DOWNLOAD_MIN_BYTES: u64 = 256 * 1024;
 const PIPELINE_MAX_SECS: u64 = 30 * 60;
 
 pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
-    let (id, format, username) = {
+    let (id, format, username, req_format, req_bitrate) = {
         let params = auth::query_params(req.uri().query().unwrap_or(""));
         (
             params.get("id").map(|v| v.to_string()).unwrap_or_default(),
             Format::from_query_value(params.get("f").map(|v| v.as_ref())).unwrap_or(Format::Xml),
             params.get("u").map(|v| v.to_string()).unwrap_or_default(),
+            // Audio format/bitrate the client asked for (quality setting). Honored
+            // for virtual tracks here; real tracks let Navidrome handle them.
+            params.get("format").map(|v| v.as_ref().to_ascii_lowercase()),
+            params.get("maxBitRate").and_then(|v| v.as_ref().parse::<u32>().ok()),
         )
     };
 
@@ -77,7 +81,19 @@ pub async fn handler(State(state): State<AppState>, req: Request) -> Response {
         }
     };
 
-    match start_pipeline(state.clone(), track, username, permit).await {
+    // Resolve the requested quality. Virtual tracks are re-encoded anyway, so
+    // `raw`/unknown just means "use the server default"; bitrate is clamped.
+    let out_format = match req_format.as_deref() {
+        Some("opus") => StreamFormat::Opus,
+        Some("mp3") => StreamFormat::Mp3,
+        _ => state.config.streaming.format,
+    };
+    let bitrate_kbps = req_bitrate
+        .filter(|b| *b > 0)
+        .map(|b| b.clamp(48, 320))
+        .unwrap_or(state.config.streaming.bitrate_kbps);
+
+    match start_pipeline(state.clone(), track, username, permit, out_format, bitrate_kbps).await {
         Ok(response) => response,
         Err(error) => {
             tracing::error!(%error, id, "virtual stream failed to start");
@@ -133,6 +149,8 @@ async fn start_pipeline(
     track: VirtualTrack,
     username: String,
     permit: tokio::sync::OwnedSemaphorePermit,
+    out_format: StreamFormat,
+    bitrate_kbps: u32,
 ) -> anyhow::Result<Response> {
     let streaming = &state.config.streaming;
     let job_id = jobs::create(&state.db, &track.id, &username).await?;
@@ -168,7 +186,7 @@ async fn start_pipeline(
     let mut ytdlp = source.ytdlp;
 
     // ffmpeg: transcode for the live pipe.
-    let (codec_args, content_type): (&[&str], &str) = match streaming.format {
+    let (codec_args, content_type): (&[&str], &str) = match out_format {
         StreamFormat::Opus => (&["-c:a", "libopus", "-f", "ogg"], "audio/ogg"),
         StreamFormat::Mp3 => (&["-c:a", "libmp3lame", "-f", "mp3"], "audio/mpeg"),
     };
@@ -187,7 +205,7 @@ async fn start_pipeline(
         // Push pages out as they're encoded instead of buffering ~1s —
         // shaves noticeable time off the first audible byte.
         .args(["-flush_packets", "1"])
-        .args(["-b:a", &format!("{}k", streaming.bitrate_kbps), "pipe:1"])
+        .args(["-b:a", &format!("{bitrate_kbps}k"), "pipe:1"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

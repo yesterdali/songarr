@@ -4,6 +4,7 @@
 // the same plain Subsonic calls surface external content for free.
 
 import { apiUrl, authQuery, type WaveSession } from "./auth";
+import { getStreamQuality, qualityParams } from "./quality";
 import type {
   Album,
   Artist,
@@ -216,9 +217,10 @@ function toLyrics(raw: RawStructuredLyrics): LyricsResult {
 // ---- URLs the <audio> tag and <img> tags hit directly ----
 
 export function streamUrl(session: WaveSession, id: string): string {
+  const { format, maxBitRate } = qualityParams(getStreamQuality());
   return apiUrl(
     session,
-    `/rest/stream?${authQuery(session)}&id=${encodeURIComponent(id)}&format=mp3&maxBitRate=320`,
+    `/rest/stream?${authQuery(session)}&id=${encodeURIComponent(id)}&format=${format}&maxBitRate=${maxBitRate}`,
   );
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type ReactNode } from "react";
 import * as api from "./api";
 import { Avatar, Cover, DownloadAllButton, SongRow } from "./components";
+import { getStreamQuality, setStreamQuality, type StreamQuality } from "./quality";
 import {
   ChevronLeftIcon,
   GothicCrossIcon,
@@ -653,6 +654,7 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
   const [busy, setBusy] = useState(false);
   const [avatarVer, setAvatarVer] = useState(1);
   const [error, setError] = useState<string | null>(null);
+  const [quality, setQuality] = useState<StreamQuality>(getStreamQuality);
 
   useEffect(() => {
     api
@@ -750,6 +752,38 @@ export function SettingsView({ onLogout }: { onLogout: () => void }) {
         >
           {saved ? "Сохранено ✓" : "Сохранить"}
         </button>
+      </section>
+      <section className="mb-8">
+        <SectionTitle>Качество звука</SectionTitle>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {(
+            [
+              ["auto", "Авто"],
+              ["low", "Низкое · 96"],
+              ["normal", "Среднее · 192"],
+              ["high", "Высокое · 320"],
+            ] as [StreamQuality, string][]
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => {
+                setQuality(value);
+                setStreamQuality(value);
+              }}
+              className={`rounded-xl border px-3 py-2.5 text-sm font-bold transition active:scale-95 ${
+                quality === value
+                  ? "border-wave-pink/40 bg-wave-pink/10 text-wave-pink"
+                  : "border-black/10 text-neutral-600 hover:bg-black/[0.04] dark:border-white/10 dark:text-neutral-300 dark:hover:bg-white/[0.04]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+          Применяется к этому устройству. «Авто» подстраивается под сеть.
+        </p>
       </section>
       <section>
         <SectionTitle>Аккаунт</SectionTitle>
